@@ -1,2 +1,0 @@
-# rssfetcher
- a rss fetcher
