@@ -126,7 +126,7 @@ def _pop_options_kvp(argv, key):
         return argv.pop(index)
     return None
 
-def configure_logger(argv: list):
+def configure_logger(argv):
     logging_options = dict(
         filename='rssfetcher.log',
         format='%(asctime)s [%(levelname)s] - %(name)s: %(message)s',
