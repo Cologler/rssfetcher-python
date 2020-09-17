@@ -65,29 +65,35 @@ def fetch_feed(feed_id, feed_section):
         try:
             r = requests.get(url, proxies=proxies, timeout=(5, 60))
         except (requests.ConnectTimeout, requests.ConnectionError) as error:
-            logger.error('%s raised: %s', type(error).__name__, error)
+            logger.error('raised %s: %s', type(error).__name__, error)
             return []
 
         try:
             r.raise_for_status()
-        except requests.HTTPError:
+        except requests.HTTPError as error:
+            logger.error('raised %s: %s', type(error).__name__, error)
             return []
 
         r.encoding = 'utf8'
-        el = et.fromstring(r.text)
-        for item in el.iter('item'):
-            rd = {
-                'feed_id': feed_id,
-                'rss_id': item.find('guid').text,
-                'title': item.find('title').text,
-                'pub_date': item.find('pubDate').text,
-                'raw': dump_xml(item)
-            }
-            description = item.find('description')
-            if description is not None:
-                rd['description'] = description.text
-            items.append(rd)
-        logger.info('total found %s items',len(items))
+        try:
+            body = r.text
+        except requests.ConnectionError:
+            body = None
+        if body:
+            el = et.fromstring(body)
+            for item in el.iter('item'):
+                rd = {
+                    'feed_id': feed_id,
+                    'rss_id': item.find('guid').text,
+                    'title': item.find('title').text,
+                    'pub_date': item.find('pubDate').text,
+                    'raw': dump_xml(item)
+                }
+                description = item.find('description')
+                if description is not None:
+                    rd['description'] = description.text
+                items.append(rd)
+            logger.info('total found %s items',len(items))
     return items
 
 def get_count(cur):
