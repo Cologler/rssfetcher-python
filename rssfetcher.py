@@ -8,14 +8,6 @@
 # ----------
 
 import logging
-
-logging.basicConfig(
-    filename='rssfetcher.log',
-    format='%(asctime)s [%(levelname)s] - %(name)s: %(message)s',
-    datefmt='%m/%d/%Y %I:%M:%S %p',
-    level=logging.INFO)
-glogger = logging.getLogger('rssfetcher')
-
 import sqlite3
 from urllib.parse import urlparse
 import xml.etree.ElementTree as et
@@ -42,6 +34,9 @@ SQL_INSERT = 'INSERT OR IGNORE INTO {} VALUES ({});'.format(
     ",".join("?" for _ in COLUMN_NAMES))
 SQL_COUNT = 'SELECT COUNT({}) FROM {}'.format(COLUMN_NAMES[0], TABLE_NAME)
 
+def get_logger():
+    return logging.getLogger('rssfetcher')
+
 def dump_xml(el):
     sb = StringIO()
     tr = et.ElementTree(el)
@@ -52,7 +47,7 @@ def fetch_feed(feed_id, feed_section):
     items = []
     url = feed_section.get('url')
     if url:
-        logger = glogger.getChild(url)
+        logger = get_logger().getChild(url)
         proxies = feed_section.get('proxies')
         if proxies is None:
             proxy = feed_section.get('proxy')
@@ -60,8 +55,9 @@ def fetch_feed(feed_id, feed_section):
                 scheme = urlparse(proxy).scheme
                 if not scheme:
                     scheme = urlparse(url).scheme or 'http'
+                    proxy = scheme + '://' + proxy
                 proxies = {}
-                proxies[scheme] = scheme + '://' + proxy
+                proxies[scheme] = proxy
 
         if proxies:
             logger.info('use proxies: %s', proxies)
@@ -113,18 +109,44 @@ def from_conf(conf_path):
                     fetched.append(tuple(item.get(x) for x in COLUMN_NAMES))
             cur.executemany(SQL_INSERT, fetched)
             count = get_count(cur) - count
-            glogger.info('total added %s rss', count)
+            get_logger().info('total added %s rss', count)
             con.commit()
     else:
-        glogger.error('no such file: %s', conf_path)
+        get_logger().error('no such file: %s', conf_path)
+
+def _pop_options_kvp(argv, key):
+    option_name = '--logger'
+    try:
+        index = argv.index(option_name)
+    except ValueError:
+        index = -1
+    option_value = None
+    if index >= 0 and len(argv) > index + 1:
+        argv.pop(index)
+        return argv.pop(index)
+    return None
+
+def configure_logger(argv: list):
+    logging_options = dict(
+        filename='rssfetcher.log',
+        format='%(asctime)s [%(levelname)s] - %(name)s: %(message)s',
+        datefmt='%m/%d/%Y %I:%M:%S %p',
+        level=logging.INFO
+    )
+    option_value = _pop_options_kvp(argv, '--logger')
+    if option_value == 'console':
+        logging_options.pop('filename', None)
+    logging.basicConfig(**logging_options)
 
 def main(argv=None):
     if argv is None:
-        argv = sys.argv
+        argv = sys.argv[1:]
+
+    configure_logger(argv)
     try:
-        from_conf(argv[1])
+        from_conf(argv[0])
     except Exception as error: # pylint: disable=W0703
-        glogger.error('main raised: %s', error)
+        get_logger().error('main raised: %s', error)
 
 if __name__ == '__main__':
     main()
