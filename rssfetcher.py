@@ -64,7 +64,7 @@ def fetch_feed(feed_id, feed_section):
 
         try:
             r = requests.get(url, proxies=proxies, timeout=(5, 60))
-        except (requests.ConnectTimeout, requests.ConnectionError) as error:
+        except requests.ConnectionError as error:
             logger.error('raised %s: %s', type(error).__name__, error)
             return []
 
@@ -77,9 +77,9 @@ def fetch_feed(feed_id, feed_section):
         r.encoding = 'utf8'
         try:
             body = r.text
-        except requests.ConnectionError:
-            body = None
-        if body:
+        except (requests.ConnectionError, requests.Timeout) as error:
+            logger.error('raised %s: %s', type(error).__name__, error)
+        else:
             el = et.fromstring(body)
             for item in el.iter('item'):
                 rd = {
@@ -152,7 +152,7 @@ def main(argv=None):
     try:
         from_conf(argv[0])
     except Exception as error: # pylint: disable=W0703
-        get_logger().error('main raised: %s', error)
+        get_logger().error('main raised: %s', error, stack_info=True)
 
 if __name__ == '__main__':
     main()
