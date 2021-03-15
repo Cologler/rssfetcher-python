@@ -46,7 +46,7 @@ def dump_xml(el):
 def fetch_feed(feed_id, feed_section):
     items = []
     url = feed_section.get('url')
-    if url:
+    if url and feed_section.get('enable', True):
         logger = get_logger().getChild(url)
         proxies = feed_section.get('proxies')
         if proxies is None:
