@@ -104,10 +104,22 @@ def get_count(cur):
     cur.execute(SQL_COUNT)
     return cur.fetchone()[0]
 
+def remove_outdated(cur, kept_count: int):
+    if not isinstance(kept_count, int):
+        return
+    if kept_count < 10: # hard limit
+        return
+
+    cur.execute('SELECT MAX(ROWID) FROM {}'.format(TABLE_NAME))
+    max_rowid = cur.fetchone()[0]
+    cur.execute('DELETE FROM {} WHERE ROWID <= {}'.format(TABLE_NAME, max_rowid - kept_count))
+    get_logger().info('removed outdated %r items.', cur.rowcount)
+
 def from_conf(conf_path):
     if os.path.isfile(conf_path):
         with open(conf_path, mode='r', encoding='utf8') as fp:
             conf_data = yaml.safe_load(fp)
+        options = conf_data.get('options', {})
         with sqlite3.connect(conf_data.get('database', 'rss.sqlite3')) as con:
             cur = con.cursor()
             cur.execute(SQL_CREATE)
@@ -124,6 +136,7 @@ def from_conf(conf_path):
             cur.executemany(SQL_INSERT, fetched)
             count = get_count(cur) - count
             get_logger().info('total added %s rss', count)
+            remove_outdated(cur, options.get('kept_count'))
             con.commit()
     else:
         get_logger().error('no such file: %s', conf_path)
