@@ -80,20 +80,24 @@ def fetch_feed(feed_id, feed_section):
         except (requests.ConnectionError, requests.Timeout) as error:
             logger.error('raised %s: %s', type(error).__name__, error)
         else:
-            el = et.fromstring(body)
-            for item in el.iter('item'):
-                rd = {
-                    'feed_id': feed_id,
-                    'rss_id': item.find('guid').text,
-                    'title': item.find('title').text,
-                    'pub_date': item.find('pubDate').text,
-                    'raw': dump_xml(item)
-                }
-                description = item.find('description')
-                if description is not None:
-                    rd['description'] = description.text
-                items.append(rd)
-            logger.info('total found %s items',len(items))
+            try:
+                el = et.fromstring(body)
+            except et.ParseError:
+                logger.error('invalid xml.')
+            else:
+                for item in el.iter('item'):
+                    rd = {
+                        'feed_id': feed_id,
+                        'rss_id': item.find('guid').text,
+                        'title': item.find('title').text,
+                        'pub_date': item.find('pubDate').text,
+                        'raw': dump_xml(item)
+                    }
+                    description = item.find('description')
+                    if description is not None:
+                        rd['description'] = description.text
+                    items.append(rd)
+                logger.info('total found %s items',len(items))
     return items
 
 def get_count(cur):
@@ -152,7 +156,7 @@ def main(argv=None):
     try:
         from_conf(argv[0])
     except Exception as error: # pylint: disable=W0703
-        get_logger().error('main raised: %s', error, stack_info=True)
+        get_logger().error('main raised: %s', error, exc_info=True)
 
 if __name__ == '__main__':
     main()
