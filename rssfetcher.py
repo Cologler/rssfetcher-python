@@ -114,9 +114,13 @@ def from_conf(conf_path):
             count = get_count(cur)
             fetched = []
             for feed_id, feed_section in conf_data.get('feeds', {}).items():
-                items = fetch_feed(feed_id, feed_section)
-                for item in items:
-                    fetched.append(tuple(item.get(x) for x in COLUMN_NAMES))
+                try:
+                    items = fetch_feed(feed_id, feed_section)
+                except Exception as error:
+                    get_logger().error('fetch %r failure with %s', error, exc_info=True)
+                else:
+                    for item in items:
+                        fetched.append(tuple(item.get(x) for x in COLUMN_NAMES))
             cur.executemany(SQL_INSERT, fetched)
             count = get_count(cur) - count
             get_logger().info('total added %s rss', count)
