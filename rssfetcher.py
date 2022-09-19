@@ -96,13 +96,15 @@ class SqliteRssStore(RssStore):
 
     def __init__(self, conn_str: str) -> None:
         self._conn = sqlite3.connect(conn_str)
+        self._cur = None
 
     def __enter__(self):
         self._cur = self._conn.cursor()
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        pass
+        self._cur and self._cur.close()
+        self._conn and self._conn.close()
 
     def init_store(self):
         DEF_COL = ', '.join([
@@ -147,17 +149,18 @@ def _load_conf(conf_path: str) -> dict:
 def from_conf(conf_data):
     options = conf_data.get('options', {})
 
-    fetched = []
-    for feed_id, feed_section in conf_data.get('feeds', {}).items():
-        try:
-            items = fetch_feed(feed_id, feed_section)
-        except Exception as error:
-            get_logger().error('fetch %r failure with %s', error, exc_info=True)
-        else:
-            for item in items:
-                fetched.append(tuple(item.get(x) for x in store.COLUMN_NAMES))
-
     with SqliteRssStore(conf_data.get('database', 'rss.sqlite3')) as store:
+
+        fetched = []
+        for feed_id, feed_section in conf_data.get('feeds', {}).items():
+            try:
+                items = fetch_feed(feed_id, feed_section)
+            except Exception as error:
+                get_logger().error('fetch %r failure with %s', error, exc_info=True)
+            else:
+                for item in items:
+                    fetched.append(tuple(item.get(x) for x in store.COLUMN_NAMES))
+
         store.init_store()
         count = store.get_count()
 
