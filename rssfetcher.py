@@ -194,66 +194,77 @@ def _fetch_feeds(conf_data: dict, feeds: list):
 
         store.commit()
 
-def _start_worker(conf_data: dict):
 
-    job_queue = queue.Queue()
+class RssFetcherWorker:
+    def __init__(self, conf_data: dict) -> None:
+        self._conf_data = conf_data
+        self._job_queue = queue.Queue()
 
-    for feed_id, feed_section in _conf_iter_feeds(conf_data):
-        job_args = (feed_id, feed_section)
-        minutes = max(feed_section.get('interval', 15), 5)
-        schedule.every(minutes).minutes.do(job_queue.put, job_args)
-        job_queue.put(job_args)
+    def start(self):
+        conf_data = self._conf_data
+        job_queue = self._job_queue
 
-    def run_on_background(func):
-        threading.Thread(target=func, daemon=True).start()
+        for feed_id, feed_section in _conf_iter_feeds(conf_data):
+            job_args = (feed_id, feed_section)
+            minutes = max(feed_section.get('interval', 15), 5)
+            schedule.every(minutes).minutes.do(job_queue.put, job_args)
+            job_queue.put(job_args)
 
-    def filter_unique_feeds(feeds):
-        s = set()
-        for f in feeds:
-            if f[0] not in s:
-                s.add(f[0])
-                yield f
+        def run_on_background(func):
+            threading.Thread(target=func, daemon=True).start()
 
-    def get_feeds_in_10s():
-        feeds = [job_queue.get()]
-        start = monotonic()
-        wait_time = 10
-        while wait_time > 0:
-            if feeds[-1] is None:
-                break
+        def filter_unique_feeds(feeds):
+            s = set()
+            for f in feeds:
+                if f[0] not in s:
+                    s.add(f[0])
+                    yield f
+
+        def get_feeds_in_10s():
+            feeds = [job_queue.get()]
+            start = monotonic()
+            wait_time = 10
+            while wait_time > 0:
+                if feeds[-1] is None:
+                    break
+                try:
+                    last = job_queue.get(timeout=wait_time)
+                except queue.Empty:
+                    break
+                else:
+                    feeds.append(last)
+                wait_time = start + 10 - monotonic()
+            return feeds
+
+        @run_on_background
+        def worker_main():
+            while True:
+                feeds = get_feeds_in_10s()
+                try:
+                    if None not in feeds:
+                        unique_feeds = list(filter_unique_feeds(feeds))
+                        get_logger().info('Receive %d fetch jobs.', len(unique_feeds))
+                        assert unique_feeds
+                        _fetch_feeds(conf_data, unique_feeds)
+                finally:
+                    for _ in range(len(feeds)):
+                        job_queue.task_done()
+
+        @run_on_background
+        def schedule_main():
             try:
-                last = job_queue.get(timeout=wait_time)
-            except queue.Empty:
-                break
-            else:
-                feeds.append(last)
-            wait_time = start + 10 - monotonic()
-        return feeds
+                while schedule.idle_seconds() is not None:
+                    schedule.run_pending()
+                    sleep(1)
+            except KeyboardInterrupt:
+                pass
 
-    @run_on_background
-    def worker_main():
-        while True:
-            feeds = get_feeds_in_10s()
-            try:
-                if None not in feeds:
-                    unique_feeds = list(filter_unique_feeds(feeds))
-                    get_logger().info('Receive %d fetch jobs.', len(unique_feeds))
-                    assert unique_feeds
-                    _fetch_feeds(conf_data, unique_feeds)
-            finally:
-                for _ in range(len(feeds)):
-                    job_queue.task_done()
+        return job_queue
 
-    @run_on_background
-    def schedule_main():
-        try:
-            while schedule.idle_seconds() is not None:
-                schedule.run_pending()
-                sleep(1)
-        except KeyboardInterrupt:
-            pass
+    def shutdown(self):
+        self._job_queue.put(None)
+        self._job_queue.join()
 
-    return job_queue
 
 def configure_logger():
     logging_options = dict(
@@ -273,18 +284,12 @@ class Settings(BaseSettings):
 
 
 def create_app(conf_data: dict):
-    worker_queue = _start_worker(conf_data)
 
     app = FastAPI()
 
-    @app.on_event("startup")
-    def startup_event():
-        pass
-
-    @app.on_event("shutdown")
-    def shutdown_event():
-        worker_queue.put(None)
-        worker_queue.join()
+    worker = RssFetcherWorker(conf_data)
+    app.on_event("startup")(worker.start)
+    app.on_event("shutdown")(worker.shutdown)
 
     @app.get("/items/")
     async def read_items(start_rowid: int = 0, limit: int = None):
