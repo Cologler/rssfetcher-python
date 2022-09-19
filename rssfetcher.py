@@ -18,6 +18,7 @@ import sys
 from contextlib import suppress
 from collections import ChainMap
 from time import monotonic, sleep
+from functools import cache
 import queue
 import threading
 
@@ -28,7 +29,7 @@ import uvicorn
 from fastapi import FastAPI
 from pydantic import BaseSettings
 
-
+@cache
 def get_logger():
     return logging.getLogger('rssfetcher')
 
@@ -144,7 +145,7 @@ class SqliteRssStore(RssStore):
         self._conn.commit()
 
     def read_items(self, start: int, limit: int = None):
-        sql = 'SELECT * FROM {} WHERE ROWID > {} ORDER BY ROWID'.format(
+        sql = 'SELECT ROWID, * FROM {} WHERE ROWID > {} ORDER BY ROWID'.format(
             self.TABLE_NAME, start,
         )
         if limit is not None:
@@ -266,18 +267,6 @@ def _start_worker(conf_data: dict):
 
     return job_queue
 
-def _pop_options_kvp(argv, key):
-    option_name = '--logger'
-    try:
-        index = argv.index(option_name)
-    except ValueError:
-        index = -1
-    option_value = None
-    if index >= 0 and len(argv) > index + 1:
-        argv.pop(index)
-        return argv.pop(index)
-    return None
-
 def configure_logger(argv):
     logging_options = dict(
         filename='rssfetcher.log',
@@ -285,11 +274,8 @@ def configure_logger(argv):
         datefmt='%m/%d/%Y %I:%M:%S %p',
         level=logging.INFO
     )
-    option_value = _pop_options_kvp(argv, '--logger')
-    if option_value == 'console':
-        logging_options.pop('filename', None)
     get_logger().setLevel(logging.INFO)
-    #logging.basicConfig(**logging_options)
+    logging.basicConfig(**logging_options)
 
 class Settings(BaseSettings):
     config: str
@@ -313,11 +299,11 @@ def create_app(conf_data: dict):
         worker_queue.join()
 
     @app.get("/items/")
-    async def read_items(start: int, limit: int = None):
+    async def read_items(start_rowid: int = 0, limit: int = None):
         if isinstance(limit, int):
             limit = max(limit, 1)
         with _conf_open_store(conf_data) as store:
-            return store.read_items(start, limit)
+            return store.read_items(start_rowid, limit)
 
     return app
 
@@ -331,6 +317,8 @@ def main(argv=None):
 
     try:
         conf_data = _load_conf(settings.config)
+
+        get_logger().info('Load config from %s', settings.config)
 
         app = create_app(conf_data)
 
