@@ -15,6 +15,7 @@ import os
 from io import StringIO
 import sys
 from contextlib import suppress
+from collections import ChainMap
 
 import requests
 import yaml
@@ -29,7 +30,7 @@ def dump_xml(el):
     tr.write(sb, encoding='unicode', short_empty_elements=False)
     return sb.getvalue()
 
-def fetch_feed(feed_id, feed_section):
+def fetch_feed(feed_id: str, feed_section: dict):
     items = []
     url = feed_section.get('url')
     if url and feed_section.get('enable', True):
@@ -148,13 +149,15 @@ def _load_conf(conf_path: str) -> dict:
 
 def from_conf(conf_data):
     options = conf_data.get('options', {})
+    default = conf_data.get('default', {})
 
     with SqliteRssStore(conf_data.get('database', 'rss.sqlite3')) as store:
 
         fetched = []
         for feed_id, feed_section in conf_data.get('feeds', {}).items():
+            chained_feed_section = ChainMap(feed_section, default)
             try:
-                items = fetch_feed(feed_id, feed_section)
+                items = fetch_feed(feed_id, chained_feed_section)
             except Exception as error:
                 get_logger().error('fetch %r failure with %s', error, exc_info=True)
             else:
