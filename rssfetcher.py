@@ -26,6 +26,7 @@ import yaml
 import schedule
 import uvicorn
 from fastapi import FastAPI
+from pydantic import BaseSettings
 
 
 def get_logger():
@@ -290,6 +291,13 @@ def configure_logger(argv):
     get_logger().setLevel(logging.INFO)
     #logging.basicConfig(**logging_options)
 
+class Settings(BaseSettings):
+    config: str
+
+    class Config:
+        env_prefix = 'RSSFETCHER_'
+
+
 def create_app(conf_data: dict):
     worker_queue = _start_worker(conf_data)
 
@@ -319,8 +327,10 @@ def main(argv=None):
 
     configure_logger(argv)
 
+    settings = Settings()
+
     try:
-        conf_data = _load_conf(argv[0])
+        conf_data = _load_conf(settings.config)
 
         app = create_app(conf_data)
 
@@ -332,4 +342,4 @@ def main(argv=None):
         get_logger().error('main raised: %s', error, exc_info=True)
 
 if __name__ == '__main__':
-    main()
+    exit(main() or 0)
