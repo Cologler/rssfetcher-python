@@ -19,20 +19,6 @@ import traceback
 import requests
 import yaml
 
-TABLE_NAME = 'rss'
-COLUMN_NAMES = ['feed_id', 'rss_id', 'title', 'raw']
-DEF_COL = ', '.join([
-    COLUMN_NAMES[0] + ' TEXT NOT NULL',
-    COLUMN_NAMES[1] + ' TEXT NOT NULL',
-    COLUMN_NAMES[2] + ' TEXT',
-    COLUMN_NAMES[3] + ' TEXT',
-    'PRIMARY KEY ({}, {})'.format(COLUMN_NAMES[0], COLUMN_NAMES[1]),
-])
-SQL_CREATE = 'CREATE TABLE IF NOT EXISTS {} ({});'.format(TABLE_NAME, DEF_COL)
-SQL_INSERT = 'INSERT OR IGNORE INTO {} VALUES ({});'.format(
-    TABLE_NAME,
-    ",".join("?" for _ in COLUMN_NAMES))
-SQL_COUNT = 'SELECT COUNT({}) FROM {}'.format(COLUMN_NAMES[0], TABLE_NAME)
 
 def get_logger():
     return logging.getLogger('rssfetcher')
@@ -100,44 +86,87 @@ def fetch_feed(feed_id, feed_section):
                 logger.info('total found %s items',len(items))
     return items
 
-def get_count(cur):
-    cur.execute(SQL_COUNT)
-    return cur.fetchone()[0]
 
-def remove_outdated(cur, kept_count: int):
-    if not isinstance(kept_count, int):
-        return
-    if kept_count < 10: # hard limit
-        return
+class RssStore:
+    COLUMN_NAMES = ('feed_id', 'rss_id', 'title', 'raw')
 
-    cur.execute('SELECT MAX(ROWID) FROM {}'.format(TABLE_NAME))
-    max_rowid = cur.fetchone()[0]
-    cur.execute('DELETE FROM {} WHERE ROWID <= {}'.format(TABLE_NAME, max_rowid - kept_count))
-    get_logger().info('removed outdated %r items.', cur.rowcount)
+
+class SqliteRssStore(RssStore):
+    TABLE_NAME = 'rss'
+
+    def __init__(self, conn_str: str) -> None:
+        self._conn = sqlite3.connect(conn_str)
+
+    def __enter__(self):
+        self._cur = self._conn.cursor()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        pass
+
+    def init_store(self):
+        DEF_COL = ', '.join([
+            self.COLUMN_NAMES[0] + ' TEXT NOT NULL',
+            self.COLUMN_NAMES[1] + ' TEXT NOT NULL',
+            self.COLUMN_NAMES[2] + ' TEXT',
+            self.COLUMN_NAMES[3] + ' TEXT',
+            'PRIMARY KEY ({}, {})'.format(self.COLUMN_NAMES[0], self.COLUMN_NAMES[1]),
+        ])
+        SQL_CREATE = 'CREATE TABLE IF NOT EXISTS {} ({});'.format(self.TABLE_NAME, DEF_COL)
+        self._cur.execute(SQL_CREATE)
+
+    def get_count(self) -> int:
+        SQL_COUNT = 'SELECT COUNT({}) FROM {}'.format(self.COLUMN_NAMES[0], self.TABLE_NAME)
+        return self._cur.execute(SQL_COUNT).fetchone()[0]
+
+    def upsert(self, items):
+        SQL_INSERT = 'INSERT OR IGNORE INTO {} VALUES ({});'.format(self.TABLE_NAME, ",".join("?" for _ in self.COLUMN_NAMES))
+        self._cur.executemany(SQL_INSERT, items)
+
+    def remove_old_items(self, kept_count: int):
+        assert isinstance(kept_count, int) and kept_count > 0 # hard limit
+
+        max_rowid = self._cur.execute('SELECT MAX(ROWID) FROM {}'.format(self.TABLE_NAME)).fetchone()[0]
+        return self._cur.execute('DELETE FROM {} WHERE ROWID <= {}'.format(self.TABLE_NAME, max_rowid - kept_count)).rowcount
+
+    def commit(self):
+        self._conn.commit()
+
 
 def from_conf(conf_path):
     if os.path.isfile(conf_path):
+
         with open(conf_path, mode='r', encoding='utf8') as fp:
             conf_data = yaml.safe_load(fp)
         options = conf_data.get('options', {})
-        with sqlite3.connect(conf_data.get('database', 'rss.sqlite3')) as con:
-            cur = con.cursor()
-            cur.execute(SQL_CREATE)
-            count = get_count(cur)
-            fetched = []
-            for feed_id, feed_section in conf_data.get('feeds', {}).items():
-                try:
-                    items = fetch_feed(feed_id, feed_section)
-                except Exception as error:
-                    get_logger().error('fetch %r failure with %s', error, exc_info=True)
-                else:
-                    for item in items:
-                        fetched.append(tuple(item.get(x) for x in COLUMN_NAMES))
-            cur.executemany(SQL_INSERT, fetched)
-            count = get_count(cur) - count
+
+        fetched = []
+        for feed_id, feed_section in conf_data.get('feeds', {}).items():
+            try:
+                items = fetch_feed(feed_id, feed_section)
+            except Exception as error:
+                get_logger().error('fetch %r failure with %s', error, exc_info=True)
+            else:
+                for item in items:
+                    fetched.append(tuple(item.get(x) for x in store.COLUMN_NAMES))
+
+        with SqliteRssStore(conf_data.get('database', 'rss.sqlite3')) as store:
+            store.init_store()
+            count = store.get_count()
+
+            store.upsert(fetched)
+            count = store.get_count() - count
             get_logger().info('total added %s rss', count)
-            remove_outdated(cur, options.get('kept_count'))
-            con.commit()
+
+            kept_count = options.get('kept_count')
+            if isinstance(kept_count, int) and kept_count >= 10: # hard limit
+                removed_count = store.remove_old_items(kept_count)
+            else:
+                removed_count = 0
+            get_logger().info('removed outdated %r items.', removed_count)
+
+            store.commit()
+
     else:
         get_logger().error('no such file: %s', conf_path)
 
