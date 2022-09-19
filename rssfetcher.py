@@ -255,7 +255,7 @@ def _start_worker(conf_data: dict):
 
     return job_queue
 
-def configure_logger(argv):
+def configure_logger():
     logging_options = dict(
         filename='rssfetcher.log',
         format='%(asctime)s [%(levelname)s] - %(name)s: %(message)s',
@@ -316,20 +316,19 @@ def _load_config(conf_path: str) -> dict:
         get_logger().error('No such file: %s', conf_path)
     exit(1)
 
-def main(argv=None):
-    if argv is None:
-        argv = sys.argv[1:]
-
-    configure_logger(argv)
-
+def fetch_once(argv):
+    configure_logger()
     settings = _load_settings(argv)
     conf_data = _load_config(settings.config)
+    _fetch_feeds(conf_data, list(_conf_iter_feeds(conf_data)))
 
-    app = create_app(conf_data)
-
-    config = uvicorn.Config(app, port=5000, log_level="info")
-    server = uvicorn.Server(config)
-    server.run()
+def _get_app(argv):
+    configure_logger()
+    settings = _load_settings(argv)
+    conf_data = _load_config(settings.config)
+    return create_app(conf_data)
 
 if __name__ == '__main__':
-    exit(main() or 0)
+    exit(fetch_once(sys.argv[1:]) or 0)
+else:
+    app = _get_app(sys.argv[1:])
