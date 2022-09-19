@@ -320,16 +320,21 @@ def _load_config(conf_path: str) -> dict:
         get_logger().error('No such file: %s', conf_path)
     exit(1)
 
-def fetch_once(argv):
+def _main_base(argv):
     configure_logger()
     settings = _load_settings(argv)
     conf_data = _load_config(settings.config)
+    with _conf_open_store(conf_data) as store:
+        store.init_store()
+        store.commit()
+    return conf_data
+
+def fetch_once(argv):
+    conf_data = _main_base(argv)
     _fetch_feeds(conf_data, list(_conf_iter_feeds(conf_data)))
 
 def _get_app(argv):
-    configure_logger()
-    settings = _load_settings(argv)
-    conf_data = _load_config(settings.config)
+    conf_data = _main_base(argv)
     return create_app(conf_data)
 
 if __name__ == '__main__':
