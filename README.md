@@ -34,3 +34,11 @@ Columns of table `rss`:
 - raw: string - the raw xml string of current rss item.
 
 It is easy to use other software to parse rss items.
+
+## Server Mode
+
+Server mode allow rssfetcher run without task scheduler, and a simple api to read the fetched data.
+
+To run in server mode, use `uvicorn rssfetcher:main`;
+
+To read fetched data, use `http://.../items/?start_rowid=...&limit=...`;
