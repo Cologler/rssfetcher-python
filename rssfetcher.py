@@ -14,7 +14,7 @@ import xml.etree.ElementTree as et
 import os
 from io import StringIO
 import sys
-import traceback
+from contextlib import suppress
 
 import requests
 import yaml
@@ -133,42 +133,46 @@ class SqliteRssStore(RssStore):
         self._conn.commit()
 
 
-def from_conf(conf_path):
+def _load_conf(conf_path: str) -> dict:
     if os.path.isfile(conf_path):
-
-        with open(conf_path, mode='r', encoding='utf8') as fp:
-            conf_data = yaml.safe_load(fp)
-        options = conf_data.get('options', {})
-
-        fetched = []
-        for feed_id, feed_section in conf_data.get('feeds', {}).items():
-            try:
-                items = fetch_feed(feed_id, feed_section)
-            except Exception as error:
-                get_logger().error('fetch %r failure with %s', error, exc_info=True)
-            else:
-                for item in items:
-                    fetched.append(tuple(item.get(x) for x in store.COLUMN_NAMES))
-
-        with SqliteRssStore(conf_data.get('database', 'rss.sqlite3')) as store:
-            store.init_store()
-            count = store.get_count()
-
-            store.upsert(fetched)
-            count = store.get_count() - count
-            get_logger().info('total added %s rss', count)
-
-            kept_count = options.get('kept_count')
-            if isinstance(kept_count, int) and kept_count >= 10: # hard limit
-                removed_count = store.remove_old_items(kept_count)
-            else:
-                removed_count = 0
-            get_logger().info('removed outdated %r items.', removed_count)
-
-            store.commit()
-
+        with suppress(FileNotFoundError):
+            with open(conf_path, mode='r', encoding='utf8') as fp:
+                return yaml.safe_load(fp)
+        get_logger().error('Unable open file: %s', conf_path)
     else:
-        get_logger().error('no such file: %s', conf_path)
+        get_logger().error('No such file: %s', conf_path)
+    exit(1)
+
+
+def from_conf(conf_data):
+    options = conf_data.get('options', {})
+
+    fetched = []
+    for feed_id, feed_section in conf_data.get('feeds', {}).items():
+        try:
+            items = fetch_feed(feed_id, feed_section)
+        except Exception as error:
+            get_logger().error('fetch %r failure with %s', error, exc_info=True)
+        else:
+            for item in items:
+                fetched.append(tuple(item.get(x) for x in store.COLUMN_NAMES))
+
+    with SqliteRssStore(conf_data.get('database', 'rss.sqlite3')) as store:
+        store.init_store()
+        count = store.get_count()
+
+        store.upsert(fetched)
+        count = store.get_count() - count
+        get_logger().info('total added %s rss', count)
+
+        kept_count = options.get('kept_count')
+        if isinstance(kept_count, int) and kept_count >= 10: # hard limit
+            removed_count = store.remove_old_items(kept_count)
+        else:
+            removed_count = 0
+        get_logger().info('removed outdated %r items.', removed_count)
+
+        store.commit()
 
 def _pop_options_kvp(argv, key):
     option_name = '--logger'
@@ -200,7 +204,8 @@ def main(argv=None):
 
     configure_logger(argv)
     try:
-        from_conf(argv[0])
+        conf_data = _load_conf(argv[0])
+        from_conf(conf_data)
     except Exception as error: # pylint: disable=W0703
         get_logger().error('main raised: %s', error, exc_info=True)
 
