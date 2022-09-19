@@ -154,17 +154,6 @@ class SqliteRssStore(RssStore):
         items = reader.fetchall()
         return items
 
-
-def _load_conf(conf_path: str) -> dict:
-    if os.path.isfile(conf_path):
-        with suppress(FileNotFoundError):
-            with open(conf_path, mode='r', encoding='utf8') as fp:
-                return yaml.safe_load(fp)
-        get_logger().error('Unable open file: %s', conf_path)
-    else:
-        get_logger().error('No such file: %s', conf_path)
-    exit(1)
-
 def _conf_iter_feeds(conf_data: dict):
     default = conf_data.get('default', {})
     for feed_id, feed_section in conf_data.get('feeds', {}).items():
@@ -311,27 +300,36 @@ def create_app(conf_data: dict):
 
     return app
 
+def _load_settings(argv):
+    settings = Settings()
+    return settings
+
+def _load_config(conf_path: str) -> dict:
+    if os.path.isfile(conf_path):
+        with suppress(FileNotFoundError):
+            with open(conf_path, mode='r', encoding='utf8') as fp:
+                data = yaml.safe_load(fp)
+                get_logger().info('Load config from %s', conf_path)
+                return data
+        get_logger().error('Unable open file: %s', conf_path)
+    else:
+        get_logger().error('No such file: %s', conf_path)
+    exit(1)
+
 def main(argv=None):
     if argv is None:
         argv = sys.argv[1:]
 
     configure_logger(argv)
 
-    settings = Settings()
+    settings = _load_settings(argv)
+    conf_data = _load_config(settings.config)
 
-    try:
-        conf_data = _load_conf(settings.config)
+    app = create_app(conf_data)
 
-        get_logger().info('Load config from %s', settings.config)
-
-        app = create_app(conf_data)
-
-        config = uvicorn.Config(app, port=5000, log_level="info")
-        server = uvicorn.Server(config)
-        server.run()
-
-    except Exception as error: # pylint: disable=W0703
-        get_logger().error('main raised: %s', error, exc_info=True)
+    config = uvicorn.Config(app, port=5000, log_level="info")
+    server = uvicorn.Server(config)
+    server.run()
 
 if __name__ == '__main__':
     exit(main() or 0)
