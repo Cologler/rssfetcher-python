@@ -7,6 +7,7 @@
 #   - requests
 # ----------
 
+from typing import *
 import logging
 import sqlite3
 from urllib.parse import urlparse
@@ -23,6 +24,8 @@ import threading
 import requests
 import yaml
 import schedule
+import uvicorn
+from fastapi import FastAPI
 
 
 def get_logger():
@@ -139,6 +142,18 @@ class SqliteRssStore(RssStore):
     def commit(self):
         self._conn.commit()
 
+    def read_items(self, start: int, limit: int = None):
+        sql = 'SELECT * FROM {} WHERE ROWID > {} ORDER BY ROWID'.format(
+            self.TABLE_NAME, start,
+        )
+        if limit is not None:
+            sql += ' LIMIT {}'.format(limit)
+
+        self._cur.row_factory = sqlite3.Row
+        reader = self._cur.execute(sql)
+        items = reader.fetchall()
+        return items
+
 
 def _load_conf(conf_path: str) -> dict:
     if os.path.isfile(conf_path):
@@ -155,10 +170,13 @@ def _conf_iter_feeds(conf_data: dict):
     for feed_id, feed_section in conf_data.get('feeds', {}).items():
         yield feed_id, ChainMap(feed_section, default)
 
+def _conf_open_store(conf_data: dict):
+    return SqliteRssStore(conf_data.get('database', 'rss.sqlite3'))
+
 def _fetch_feeds(conf_data: dict, feeds: list):
     options = conf_data.get('options', {})
 
-    with SqliteRssStore(conf_data.get('database', 'rss.sqlite3')) as store:
+    with _conf_open_store(conf_data) as store:
         # fetch from internet:
         fetched = []
         for feed_id, feed_section in feeds:
@@ -191,50 +209,61 @@ def _start_worker(conf_data: dict):
 
     job_queue = queue.Queue()
 
-    def get_feeds_in_10s():
-        feeds = [job_queue.get()]
-        start = monotonic()
-        wait_time = 10
-        while wait_time > 0:
-            try:
-                feeds.append(job_queue.get(timeout=wait_time))
-            except queue.Empty:
-                break
-            wait_time = start + 10 - monotonic()
-
-        rv = []
-        s = set()
-        for f in feeds:
-            if f[0] not in s:
-                rv.append(f)
-                s.add(f[0])
-        return rv
-
-    def worker_main():
-        while True:
-            feeds = get_feeds_in_10s()
-            get_logger().info('Receive %d fetch jobs.', len(feeds))
-            assert feeds
-            _fetch_feeds(conf_data, feeds)
-            for _ in range(len(feeds)):
-                job_queue.task_done()
-
-    worker_thread = threading.Thread(target=worker_main, daemon=True)
-    worker_thread.start()
-
     for feed_id, feed_section in _conf_iter_feeds(conf_data):
         job_args = (feed_id, feed_section)
         minutes = max(feed_section.get('interval', 15), 5)
         schedule.every(minutes).minutes.do(job_queue.put, job_args)
 
-    while schedule.idle_seconds() is not None:
-        schedule.run_pending()
-        try:
-            sleep(1)
-        except KeyboardInterrupt:
-            break
+    def run_on_background(func):
+        threading.Thread(target=func, daemon=True).start()
 
-    job_queue.join() # wait all enqueued tasks
+    def filter_unique_feeds(feeds):
+        s = set()
+        for f in feeds:
+            if f[0] not in s:
+                s.add(f[0])
+                yield f
+
+    def get_feeds_in_10s():
+        feeds = [job_queue.get()]
+        start = monotonic()
+        wait_time = 10
+        while wait_time > 0:
+            if feeds[-1] is None:
+                break
+            try:
+                last = job_queue.get(timeout=wait_time)
+            except queue.Empty:
+                break
+            else:
+                feeds.append(last)
+            wait_time = start + 10 - monotonic()
+        return feeds
+
+    @run_on_background
+    def worker_main():
+        while True:
+            feeds = get_feeds_in_10s()
+            try:
+                if None not in feeds:
+                    unique_feeds = list(filter_unique_feeds(feeds))
+                    get_logger().info('Receive %d fetch jobs.', len(unique_feeds))
+                    assert unique_feeds
+                    _fetch_feeds(conf_data, unique_feeds)
+            finally:
+                for _ in range(len(feeds)):
+                    job_queue.task_done()
+
+    @run_on_background
+    def schedule_main():
+        try:
+            while schedule.idle_seconds() is not None:
+                schedule.run_pending()
+                sleep(1)
+        except KeyboardInterrupt:
+            pass
+
+    return job_queue
 
 def _pop_options_kvp(argv, key):
     option_name = '--logger'
@@ -258,16 +287,47 @@ def configure_logger(argv):
     option_value = _pop_options_kvp(argv, '--logger')
     if option_value == 'console':
         logging_options.pop('filename', None)
-    logging.basicConfig(**logging_options)
+    get_logger().setLevel(logging.INFO)
+    #logging.basicConfig(**logging_options)
+
+def create_app(conf_data: dict):
+    worker_queue = _start_worker(conf_data)
+
+    app = FastAPI()
+
+    @app.on_event("startup")
+    def startup_event():
+        pass
+
+    @app.on_event("shutdown")
+    def shutdown_event():
+        worker_queue.put(None)
+        worker_queue.join()
+
+    @app.get("/items/")
+    async def read_items(start: int, limit: int = None):
+        if isinstance(limit, int):
+            limit = max(limit, 1)
+        with _conf_open_store(conf_data) as store:
+            return store.read_items(start, limit)
+
+    return app
 
 def main(argv=None):
     if argv is None:
         argv = sys.argv[1:]
 
     configure_logger(argv)
+
     try:
         conf_data = _load_conf(argv[0])
-        _start_worker(conf_data)
+
+        app = create_app(conf_data)
+
+        config = uvicorn.Config(app, port=5000, log_level="info")
+        server = uvicorn.Server(config)
+        server.run()
+
     except Exception as error: # pylint: disable=W0703
         get_logger().error('main raised: %s', error, exc_info=True)
 
