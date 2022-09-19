@@ -16,6 +16,7 @@ from io import StringIO
 import sys
 from contextlib import suppress
 from collections import ChainMap
+from typing import List
 
 import requests
 import yaml
@@ -147,14 +148,14 @@ def _load_conf(conf_path: str) -> dict:
     exit(1)
 
 
-def from_conf(conf_data):
+def _fetch_feeds(conf_data: dict, feeds: list):
     options = conf_data.get('options', {})
     default = conf_data.get('default', {})
 
     with SqliteRssStore(conf_data.get('database', 'rss.sqlite3')) as store:
-
+        # fetch from internet:
         fetched = []
-        for feed_id, feed_section in conf_data.get('feeds', {}).items():
+        for feed_id, feed_section in feeds:
             chained_feed_section = ChainMap(feed_section, default)
             try:
                 items = fetch_feed(feed_id, chained_feed_section)
@@ -164,6 +165,7 @@ def from_conf(conf_data):
                 for item in items:
                     fetched.append(tuple(item.get(x) for x in store.COLUMN_NAMES))
 
+        # save:
         store.init_store()
         count = store.get_count()
 
@@ -179,6 +181,11 @@ def from_conf(conf_data):
         get_logger().info('removed outdated %r items.', removed_count)
 
         store.commit()
+
+
+def from_conf(conf_data: dict):
+    _fetch_feeds(conf_data, list(conf_data.get('feeds', {}).items()))
+
 
 def _pop_options_kvp(argv, key):
     option_name = '--logger'
