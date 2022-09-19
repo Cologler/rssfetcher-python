@@ -144,12 +144,10 @@ class SqliteRssStore(RssStore):
     def commit(self):
         self._conn.commit()
 
-    def read_items(self, start: int, limit: int = None):
-        sql = 'SELECT ROWID, * FROM {} WHERE ROWID > {} ORDER BY ROWID'.format(
-            self.TABLE_NAME, start,
+    def read_items(self, start_rowid: int, limit: int):
+        sql = 'SELECT ROWID, * FROM {} WHERE ROWID > {} ORDER BY ROWID LIMIT {}'.format(
+            self.TABLE_NAME, start_rowid, limit
         )
-        if limit is not None:
-            sql += ' LIMIT {}'.format(limit)
 
         self._cur.row_factory = sqlite3.Row
         reader = self._cur.execute(sql)
@@ -185,7 +183,7 @@ def _fetch_feeds(conf_data: dict, feeds: list):
             try:
                 items = fetch_feed(feed_id, feed_section)
             except Exception as error:
-                get_logger().error('fetch %r failure with %s', error, exc_info=True)
+                get_logger().error('fetch %r failure with %s', feed_id, error, exc_info=True)
             else:
                 for item in items:
                     fetched.append(tuple(item.get(x) for x in store.COLUMN_NAMES))
@@ -215,6 +213,7 @@ def _start_worker(conf_data: dict):
         job_args = (feed_id, feed_section)
         minutes = max(feed_section.get('interval', 15), 5)
         schedule.every(minutes).minutes.do(job_queue.put, job_args)
+        job_queue.put(job_args)
 
     def run_on_background(func):
         threading.Thread(target=func, daemon=True).start()
@@ -300,10 +299,15 @@ def create_app(conf_data: dict):
 
     @app.get("/items/")
     async def read_items(start_rowid: int = 0, limit: int = None):
-        if isinstance(limit, int):
-            limit = max(limit, 1)
+        limit_max = 1000
+        limit = min(max(limit, 1), limit_max) if isinstance(limit, int) else limit_max
+
         with _conf_open_store(conf_data) as store:
-            return store.read_items(start_rowid, limit)
+            readed_items = store.read_items(start_rowid, limit + 1)
+            return {
+                'end': len(readed_items) <= limit,
+                'items': readed_items[:limit],
+            }
 
     return app
 
