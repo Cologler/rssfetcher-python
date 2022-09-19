@@ -16,10 +16,13 @@ from io import StringIO
 import sys
 from contextlib import suppress
 from collections import ChainMap
-from typing import List
+from time import monotonic, sleep
+import queue
+import threading
 
 import requests
 import yaml
+import schedule
 
 
 def get_logger():
@@ -147,18 +150,20 @@ def _load_conf(conf_path: str) -> dict:
         get_logger().error('No such file: %s', conf_path)
     exit(1)
 
+def _conf_iter_feeds(conf_data: dict):
+    default = conf_data.get('default', {})
+    for feed_id, feed_section in conf_data.get('feeds', {}).items():
+        yield feed_id, ChainMap(feed_section, default)
 
 def _fetch_feeds(conf_data: dict, feeds: list):
     options = conf_data.get('options', {})
-    default = conf_data.get('default', {})
 
     with SqliteRssStore(conf_data.get('database', 'rss.sqlite3')) as store:
         # fetch from internet:
         fetched = []
         for feed_id, feed_section in feeds:
-            chained_feed_section = ChainMap(feed_section, default)
             try:
-                items = fetch_feed(feed_id, chained_feed_section)
+                items = fetch_feed(feed_id, feed_section)
             except Exception as error:
                 get_logger().error('fetch %r failure with %s', error, exc_info=True)
             else:
@@ -182,10 +187,54 @@ def _fetch_feeds(conf_data: dict, feeds: list):
 
         store.commit()
 
+def _start_worker(conf_data: dict):
 
-def from_conf(conf_data: dict):
-    _fetch_feeds(conf_data, list(conf_data.get('feeds', {}).items()))
+    job_queue = queue.Queue()
 
+    def get_feeds_in_10s():
+        feeds = [job_queue.get()]
+        start = monotonic()
+        wait_time = 10
+        while wait_time > 0:
+            try:
+                feeds.append(job_queue.get(timeout=wait_time))
+            except queue.Empty:
+                break
+            wait_time = start + 10 - monotonic()
+
+        rv = []
+        s = set()
+        for f in feeds:
+            if f[0] not in s:
+                rv.append(f)
+                s.add(f[0])
+        return rv
+
+    def worker_main():
+        while True:
+            feeds = get_feeds_in_10s()
+            get_logger().info('Receive %d fetch jobs.', len(feeds))
+            assert feeds
+            _fetch_feeds(conf_data, feeds)
+            for _ in range(len(feeds)):
+                job_queue.task_done()
+
+    worker_thread = threading.Thread(target=worker_main, daemon=True)
+    worker_thread.start()
+
+    for feed_id, feed_section in _conf_iter_feeds(conf_data):
+        job_args = (feed_id, feed_section)
+        minutes = max(feed_section.get('interval', 15), 5)
+        schedule.every(minutes).minutes.do(job_queue.put, job_args)
+
+    while schedule.idle_seconds() is not None:
+        schedule.run_pending()
+        try:
+            sleep(1)
+        except KeyboardInterrupt:
+            break
+
+    job_queue.join() # wait all enqueued tasks
 
 def _pop_options_kvp(argv, key):
     option_name = '--logger'
@@ -218,7 +267,7 @@ def main(argv=None):
     configure_logger(argv)
     try:
         conf_data = _load_conf(argv[0])
-        from_conf(conf_data)
+        _start_worker(conf_data)
     except Exception as error: # pylint: disable=W0703
         get_logger().error('main raised: %s', error, exc_info=True)
 
