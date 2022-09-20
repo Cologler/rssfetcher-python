@@ -89,7 +89,7 @@ def fetch_feed(feed_id: str, feed_section: dict):
                 logger.info('total found %s items',len(items))
     return items
 
-def _fetch_feeds(conf: ConfigHelper, feeds: list):
+def fetch_feeds(conf: ConfigHelper, feeds: list):
     options = conf.conf_data.get('options', {})
 
     with conf.open_store() as store:
@@ -171,7 +171,7 @@ class RssFetcherWorker:
                         unique_feeds = list(filter_unique_feeds(feeds))
                         get_logger().info('Receive %d fetch jobs.', len(unique_feeds))
                         assert unique_feeds
-                        _fetch_feeds(self._conf, unique_feeds)
+                        fetch_feeds(self._conf, unique_feeds)
                 finally:
                     for _ in range(len(feeds)):
                         job_queue.task_done()

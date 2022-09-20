@@ -9,6 +9,9 @@ start:
 build:
     docker build . -t rssfetcher
 
+test:
+    poetry run python -m pytest
+
 pack:
     mkdir -p dist
     tar -cf dist/out.tar --exclude .git --exclude=.venv --exclude=dist --exclude=*.tar *
