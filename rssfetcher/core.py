@@ -104,8 +104,10 @@ def fetch_feeds(conf: ConfigHelper, feeds: list):
                 for item in items:
                     fetched.append(tuple(item.get(x) for x in store.COLUMN_NAMES))
 
+        if not fetched:
+            return
+
         # save:
-        store.init_store()
         count = store.get_count()
 
         store.upsert(fetched)
