@@ -1,17 +1,20 @@
 set dotenv-load
 
+export-dependencies:
+    poetry export --without-hashes > requirements.txt
+
 fetch:
     poetry run python -m rssfetcher
 
 start:
     poetry run uvicorn rssfetcher:app
 
-build:
-    docker build . -t rssfetcher
-
 test:
     poetry run python -m pytest
 
-pack:
+build: export-dependencies
+    docker build . -t rssfetcher
+
+pack-tar: export-dependencies
     mkdir -p dist
-    tar -cf dist/out.tar --exclude .git --exclude=.venv --exclude=dist --exclude=*.tar *
+    tar -cf dist/out.tar --exclude=.* --exclude=dist --exclude=tests --exclude=*.tar *

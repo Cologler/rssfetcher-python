@@ -1,12 +1,13 @@
-FROM python:3.10.7
+FROM python:3.10.7-alpine3.16
 
 WORKDIR /usr/src/app
+
+COPY requirements.txt /requirements.txt
+RUN pip install --user -r /requirements.txt
 
 COPY . .
 
 RUN mkdir -p ~/.local/state/rssfetcher
-RUN pip install poetry
-RUN poetry install
 
 EXPOSE 8000
 
@@ -15,4 +16,4 @@ ENV UVICORN_HOST=0.0.0.0
 
 VOLUME /etc/rssfetcher
 
-CMD [ "poetry", "run", "uvicorn", "rssfetcher:app" ]
+CMD [ "python", "-m", "uvicorn", "rssfetcher:app" ]
