@@ -50,6 +50,9 @@ class SqliteRssStore(RssStore):
         assert isinstance(kept_count, int) and kept_count > 0 # hard limit
 
         max_rowid = self._cur.execute('SELECT MAX(ROWID) FROM {}'.format(self.TABLE_NAME)).fetchone()[0]
+        if max_rowid is None:
+            # no items
+            return 0
         return self._cur.execute('DELETE FROM {} WHERE ROWID <= {}'.format(self.TABLE_NAME, max_rowid - kept_count)).rowcount
 
     def commit(self):
