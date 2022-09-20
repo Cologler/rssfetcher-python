@@ -291,7 +291,7 @@ def create_app(conf_data: dict):
     app.on_event("shutdown")(worker.shutdown)
 
     @app.get("/items/")
-    async def read_items(start_rowid: int = 0, limit: int = None):
+    async def get_items(start_rowid: int = 0, limit: int = None):
         limit_max = 1000
         limit = min(max(limit, 1), limit_max) if isinstance(limit, int) else limit_max
 
@@ -300,6 +300,13 @@ def create_app(conf_data: dict):
             return {
                 'end': len(readed_items) <= limit,
                 'items': readed_items[:limit],
+            }
+
+    @app.get("/items-count")
+    async def get_items_count():
+        with _conf_open_store(conf_data) as store:
+            return {
+                'count': store.get_count()
             }
 
     return app
