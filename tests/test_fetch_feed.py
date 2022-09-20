@@ -8,12 +8,12 @@
 from rssfetcher.core import fetch_feed, fetch_feeds
 from rssfetcher.stores import RssStore
 
-def test_fetch_feed_fake_dest():
+async def test_fetch_feed_fake_dest():
     assert [] == fetch_feed('', {
         'url': 'http://127.0.0.1:7777'
     })
 
-def test_fetch_feed_real_dest():
+async def _test_fetch_feed_real_dest():
     items = fetch_feed('', {
         'url': 'https://dmhy.org/topics/rss/rss.xml'
     })
