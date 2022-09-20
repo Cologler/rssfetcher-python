@@ -9,40 +9,26 @@
 
 from typing import *
 import logging
-from urllib.parse import urlparse
-import xml.etree.ElementTree as et
 import os
-from io import StringIO
 import sys
 from contextlib import suppress
 from collections import ChainMap
 from time import monotonic, sleep
-from functools import cache
 import queue
 import threading
 
-import requests
 import yaml
 import schedule
-import uvicorn
 from fastapi import FastAPI
 from pydantic import BaseSettings
 
-from .stores import open_store
 from .core import get_logger, fetch_feed
+from .cfg import ConfigHelper
 
-def _conf_iter_feeds(conf_data: dict):
-    default = conf_data.get('default', {})
-    for feed_id, feed_section in conf_data.get('feeds', {}).items():
-        yield feed_id, ChainMap(feed_section, default)
+def _fetch_feeds(conf: ConfigHelper, feeds: list):
+    options = conf.conf_data.get('options', {})
 
-def _conf_open_store(conf_data: dict):
-    return open_store(conf_data.get('database', 'rss.sqlite3'))
-
-def _fetch_feeds(conf_data: dict, feeds: list):
-    options = conf_data.get('options', {})
-
-    with _conf_open_store(conf_data) as store:
+    with conf.open_store() as store:
         # fetch from internet:
         fetched = []
         for feed_id, feed_section in feeds:
@@ -73,15 +59,14 @@ def _fetch_feeds(conf_data: dict, feeds: list):
 
 
 class RssFetcherWorker:
-    def __init__(self, conf_data: dict) -> None:
-        self._conf_data = conf_data
+    def __init__(self, conf: ConfigHelper) -> None:
+        self._conf = conf
         self._job_queue = queue.Queue()
 
     def start(self):
-        conf_data = self._conf_data
         job_queue = self._job_queue
 
-        for feed_id, feed_section in _conf_iter_feeds(conf_data):
+        for feed_id, feed_section in self._conf.iter_feeds():
             job_args = (feed_id, feed_section)
             minutes = max(feed_section.get('interval', 15), 5)
             schedule.every(minutes).minutes.do(job_queue.put, job_args)
@@ -122,7 +107,7 @@ class RssFetcherWorker:
                         unique_feeds = list(filter_unique_feeds(feeds))
                         get_logger().info('Receive %d fetch jobs.', len(unique_feeds))
                         assert unique_feeds
-                        _fetch_feeds(conf_data, unique_feeds)
+                        _fetch_feeds(self._conf, unique_feeds)
                 finally:
                     for _ in range(len(feeds)):
                         job_queue.task_done()
@@ -159,11 +144,11 @@ class Settings(BaseSettings):
         env_prefix = 'RSSFETCHER_'
 
 
-def create_app(conf_data: dict):
+def create_app(conf: ConfigHelper):
 
     app = FastAPI()
 
-    worker = RssFetcherWorker(conf_data)
+    worker = RssFetcherWorker(conf)
     app.on_event("startup")(worker.start)
     app.on_event("shutdown")(worker.shutdown)
 
@@ -172,7 +157,7 @@ def create_app(conf_data: dict):
         limit_max = 1000
         limit = min(max(limit, 1), limit_max) if isinstance(limit, int) else limit_max
 
-        with _conf_open_store(conf_data) as store:
+        with conf.open_store() as store:
             readed_items = store.read_items(start_rowid, limit + 1)
             return {
                 'end': len(readed_items) <= limit,
@@ -181,7 +166,7 @@ def create_app(conf_data: dict):
 
     @app.get("/items-count")
     async def get_items_count():
-        with _conf_open_store(conf_data) as store:
+        with conf.open_store() as store:
             return {
                 'count': store.get_count()
             }
@@ -208,18 +193,19 @@ def _main_base(argv):
     configure_logger()
     settings = _load_settings(argv)
     conf_data = _load_config(settings.config)
-    with _conf_open_store(conf_data) as store:
+    conf = ConfigHelper(conf_data)
+    with conf.open_store() as store:
         store.init_store()
         store.commit()
-    return conf_data
+    return conf
 
 def fetch_once(argv):
-    conf_data = _main_base(argv)
-    _fetch_feeds(conf_data, list(_conf_iter_feeds(conf_data)))
+    conf = _main_base(argv)
+    _fetch_feeds(conf, list(conf.iter_feeds()))
 
 def _get_app(argv):
-    conf_data = _main_base(argv)
-    return create_app(conf_data)
+    conf = _main_base(argv)
+    return create_app(conf)
 
 if __name__ == '__main__':
     exit(fetch_once(sys.argv[1:]) or 0)
