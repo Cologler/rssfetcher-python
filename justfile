@@ -1,5 +1,10 @@
+set dotenv-load
+
+fetch:
+    poetry run python -m rssfetcher
+
 start:
-    poetry run uvicorn rssfetcher:main
+    poetry run uvicorn rssfetcher:app
 
 build:
     docker build . -t rssfetcher

@@ -1,33 +1,26 @@
 # -*- coding: utf-8 -*-
 #
-# Copyright (c) 2020~2999 - Cologler <skyoflw@gmail.com>
+# Copyright (c) 2022~2999 - Cologler <skyoflw@gmail.com>
 # ----------
-# require packages:
-#   - pyyaml
-#   - requests
+#
 # ----------
 
-from typing import *
-import logging
-import sqlite3
-from urllib.parse import urlparse
-import xml.etree.ElementTree as et
-import os
-from io import StringIO
-import sys
-from contextlib import suppress
-from collections import ChainMap
-from time import monotonic, sleep
 from functools import cache
+from io import StringIO
+from urllib.parse import urlparse
+from time import monotonic, sleep
+from contextlib import suppress
+import os
+import xml.etree.ElementTree as et
+import logging
 import queue
 import threading
 
 import requests
-import yaml
 import schedule
-import uvicorn
-from fastapi import FastAPI
-from pydantic import BaseSettings
+from pydantic import BaseSettings, ValidationError
+
+from .cfg import ConfigHelper
 
 @cache
 def get_logger():
@@ -96,76 +89,10 @@ def fetch_feed(feed_id: str, feed_section: dict):
                 logger.info('total found %s items',len(items))
     return items
 
+def _fetch_feeds(conf: ConfigHelper, feeds: list):
+    options = conf.conf_data.get('options', {})
 
-class RssStore:
-    COLUMN_NAMES = ('feed_id', 'rss_id', 'title', 'raw')
-
-
-class SqliteRssStore(RssStore):
-    TABLE_NAME = 'rss'
-
-    def __init__(self, conn_str: str) -> None:
-        self._conn = sqlite3.connect(conn_str)
-        self._cur = None
-
-    def __enter__(self):
-        self._cur = self._conn.cursor()
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        self._cur and self._cur.close()
-        self._conn and self._conn.close()
-
-    def init_store(self):
-        DEF_COL = ', '.join([
-            self.COLUMN_NAMES[0] + ' TEXT NOT NULL',
-            self.COLUMN_NAMES[1] + ' TEXT NOT NULL',
-            self.COLUMN_NAMES[2] + ' TEXT',
-            self.COLUMN_NAMES[3] + ' TEXT',
-            'PRIMARY KEY ({}, {})'.format(self.COLUMN_NAMES[0], self.COLUMN_NAMES[1]),
-        ])
-        SQL_CREATE = 'CREATE TABLE IF NOT EXISTS {} ({});'.format(self.TABLE_NAME, DEF_COL)
-        self._cur.execute(SQL_CREATE)
-
-    def get_count(self) -> int:
-        SQL_COUNT = 'SELECT COUNT({}) FROM {}'.format(self.COLUMN_NAMES[0], self.TABLE_NAME)
-        return self._cur.execute(SQL_COUNT).fetchone()[0]
-
-    def upsert(self, items):
-        SQL_INSERT = 'INSERT OR IGNORE INTO {} VALUES ({});'.format(self.TABLE_NAME, ",".join("?" for _ in self.COLUMN_NAMES))
-        self._cur.executemany(SQL_INSERT, items)
-
-    def remove_old_items(self, kept_count: int):
-        assert isinstance(kept_count, int) and kept_count > 0 # hard limit
-
-        max_rowid = self._cur.execute('SELECT MAX(ROWID) FROM {}'.format(self.TABLE_NAME)).fetchone()[0]
-        return self._cur.execute('DELETE FROM {} WHERE ROWID <= {}'.format(self.TABLE_NAME, max_rowid - kept_count)).rowcount
-
-    def commit(self):
-        self._conn.commit()
-
-    def read_items(self, start_rowid: int, limit: int):
-        sql = 'SELECT ROWID, * FROM {} WHERE ROWID > {} ORDER BY ROWID LIMIT {}'.format(
-            self.TABLE_NAME, start_rowid, limit
-        )
-
-        self._cur.row_factory = sqlite3.Row
-        reader = self._cur.execute(sql)
-        items = reader.fetchall()
-        return items
-
-def _conf_iter_feeds(conf_data: dict):
-    default = conf_data.get('default', {})
-    for feed_id, feed_section in conf_data.get('feeds', {}).items():
-        yield feed_id, ChainMap(feed_section, default)
-
-def _conf_open_store(conf_data: dict):
-    return SqliteRssStore(conf_data.get('database', 'rss.sqlite3'))
-
-def _fetch_feeds(conf_data: dict, feeds: list):
-    options = conf_data.get('options', {})
-
-    with _conf_open_store(conf_data) as store:
+    with conf.open_store() as store:
         # fetch from internet:
         fetched = []
         for feed_id, feed_section in feeds:
@@ -196,15 +123,14 @@ def _fetch_feeds(conf_data: dict, feeds: list):
 
 
 class RssFetcherWorker:
-    def __init__(self, conf_data: dict) -> None:
-        self._conf_data = conf_data
+    def __init__(self, conf: ConfigHelper) -> None:
+        self._conf = conf
         self._job_queue = queue.Queue()
 
     def start(self):
-        conf_data = self._conf_data
         job_queue = self._job_queue
 
-        for feed_id, feed_section in _conf_iter_feeds(conf_data):
+        for feed_id, feed_section in self._conf.iter_feeds():
             job_args = (feed_id, feed_section)
             minutes = max(feed_section.get('interval', 15), 5)
             schedule.every(minutes).minutes.do(job_queue.put, job_args)
@@ -245,7 +171,7 @@ class RssFetcherWorker:
                         unique_feeds = list(filter_unique_feeds(feeds))
                         get_logger().info('Receive %d fetch jobs.', len(unique_feeds))
                         assert unique_feeds
-                        _fetch_feeds(conf_data, unique_feeds)
+                        _fetch_feeds(self._conf, unique_feeds)
                 finally:
                     for _ in range(len(feeds)):
                         job_queue.task_done()
@@ -266,15 +192,6 @@ class RssFetcherWorker:
         self._job_queue.join()
 
 
-def configure_logger():
-    logging_options = dict(
-        format='%(asctime)s [%(levelname)s] - %(name)s: %(message)s',
-        datefmt='%m/%d/%Y %I:%M:%S %p',
-        level=logging.INFO
-    )
-    get_logger().setLevel(logging.INFO)
-    logging.basicConfig(**logging_options)
-
 class Settings(BaseSettings):
     config: str
 
@@ -282,69 +199,43 @@ class Settings(BaseSettings):
         env_prefix = 'RSSFETCHER_'
 
 
-def create_app(conf_data: dict):
-
-    app = FastAPI()
-
-    worker = RssFetcherWorker(conf_data)
-    app.on_event("startup")(worker.start)
-    app.on_event("shutdown")(worker.shutdown)
-
-    @app.get("/items/")
-    async def get_items(start_rowid: int = 0, limit: int = None):
-        limit_max = 1000
-        limit = min(max(limit, 1), limit_max) if isinstance(limit, int) else limit_max
-
-        with _conf_open_store(conf_data) as store:
-            readed_items = store.read_items(start_rowid, limit + 1)
-            return {
-                'end': len(readed_items) <= limit,
-                'items': readed_items[:limit],
-            }
-
-    @app.get("/items-count")
-    async def get_items_count():
-        with _conf_open_store(conf_data) as store:
-            return {
-                'count': store.get_count()
-            }
-
-    return app
-
-def _load_settings(argv):
-    settings = Settings()
-    return settings
-
-def _load_config(conf_path: str) -> dict:
-    if os.path.isfile(conf_path):
-        with suppress(FileNotFoundError):
-            with open(conf_path, mode='r', encoding='utf8') as fp:
-                data = yaml.safe_load(fp)
-                get_logger().info('Load config from %s', conf_path)
-                return data
-        get_logger().error('Unable open file: %s', conf_path)
-    else:
-        get_logger().error('No such file: %s', conf_path)
-    exit(1)
-
 def _main_base(argv):
+    import yaml
+
+    def configure_logger():
+        logging_options = dict(
+            format='%(asctime)s [%(levelname)s] - %(name)s: %(message)s',
+            datefmt='%m/%d/%Y %I:%M:%S %p',
+            level=logging.INFO
+        )
+        get_logger().setLevel(logging.INFO)
+        logging.basicConfig(**logging_options)
+
+    def _load_settings(argv):
+        try:
+            settings = Settings()
+        except ValidationError as e:
+            get_logger().error(e)
+            exit()
+        return settings
+
+    def _load_config(conf_path: str) -> dict:
+        if os.path.isfile(conf_path):
+            with suppress(FileNotFoundError):
+                with open(conf_path, mode='r', encoding='utf8') as fp:
+                    data = yaml.safe_load(fp)
+                    get_logger().info('Load config from %s', conf_path)
+                    return data
+            get_logger().error('Unable open file: %s', conf_path)
+        else:
+            get_logger().error('No such file: %s', conf_path)
+        exit(1)
+
     configure_logger()
     settings = _load_settings(argv)
     conf_data = _load_config(settings.config)
-    with _conf_open_store(conf_data) as store:
+    conf = ConfigHelper(conf_data)
+    with conf.open_store() as store:
         store.init_store()
         store.commit()
-    return conf_data
-
-def fetch_once(argv):
-    conf_data = _main_base(argv)
-    _fetch_feeds(conf_data, list(_conf_iter_feeds(conf_data)))
-
-def _get_app(argv):
-    conf_data = _main_base(argv)
-    return create_app(conf_data)
-
-if __name__ == '__main__':
-    exit(fetch_once(sys.argv[1:]) or 0)
-else:
-    app = _get_app(sys.argv[1:])
+    return conf
