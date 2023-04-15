@@ -1,12 +1,11 @@
-FROM python:3.10.7-alpine3.16
+FROM python:3.10.11-alpine3.17
 
 WORKDIR /usr/src/app
 
-COPY requirements.txt /requirements.txt
-RUN pip install --user -r /requirements.txt
+COPY requirements.txt requirements.txt
+COPY rssfetcher rssfetcher
 
-COPY . .
-
+RUN pip install --user -r requirements.txt
 RUN mkdir -p ~/.local/state/rssfetcher
 
 EXPOSE 8000
