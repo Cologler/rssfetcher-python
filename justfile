@@ -1,8 +1,5 @@
 set dotenv-load
 
-export-dependencies:
-    poetry export --without-hashes > requirements.txt
-
 fetch:
     poetry run python -m rssfetcher
 
@@ -12,9 +9,10 @@ start:
 test:
     poetry run python -m pytest
 
-build: export-dependencies
-    docker build . -t rssfetcher
+export-requirements:
+    poetry export --without-hashes > requirements.txt
 
-pack-tar: export-dependencies
+publish-docker-image: export-requirements
     mkdir -p dist
-    tar -cf dist/out.tar --exclude=.* --exclude=dist --exclude=tests --exclude=*.tar *
+    docker build . --tag rssfetcher
+    docker save --output dist/rssfetcher-image.tar rssfetcher
