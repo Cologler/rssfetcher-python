@@ -12,6 +12,10 @@ test:
 export-requirements:
     poetry export --without-hashes > requirements.txt
 
+publish-docker-build-tar: export-requirements
+    mkdir -p dist
+    tar -cf dist/rssfetcher-build.tar --exclude=.* --exclude=dist --exclude=tests --exclude=*.tar *
+
 publish-docker-image: export-requirements
     mkdir -p dist
     docker build . --tag rssfetcher
