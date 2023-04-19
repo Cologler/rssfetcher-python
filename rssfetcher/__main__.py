@@ -5,8 +5,6 @@
 #
 # ----------
 
-from typing import *
-import os
 import sys
 
 from .core import _main_base, fetch_feeds

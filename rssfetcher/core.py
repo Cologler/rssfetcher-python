@@ -20,7 +20,7 @@ import requests
 import schedule
 from pydantic import BaseSettings, ValidationError
 
-from .cfg import ConfigHelper
+from .cfg import ConfigHelper, FeedSection
 
 @cache
 def get_logger():
@@ -32,7 +32,7 @@ def dump_xml(el):
     tr.write(sb, encoding='unicode', short_empty_elements=False)
     return sb.getvalue()
 
-def fetch_feed(feed_id: str, feed_section: dict):
+def fetch_feed(feed_id: str, feed_section: FeedSection):
     items = []
     url = feed_section.get('url')
     if url and feed_section.get('enable', True):
