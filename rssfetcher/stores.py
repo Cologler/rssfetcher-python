@@ -9,7 +9,17 @@ import sqlite3
 
 
 class RssStore:
-    COLUMN_NAMES = ('feed_id', 'rss_id', 'title', 'raw')
+    COLUMN_NAME_FEED_ID = 'feed_id'
+    COLUMN_NAME_RSS_ID = 'rss_id'
+    COLUMN_NAME_TITLE = 'title'
+    COLUMN_NAME_RAW = 'raw'
+
+    COLUMN_NAMES = (
+        COLUMN_NAME_FEED_ID,
+        COLUMN_NAME_RSS_ID,
+        COLUMN_NAME_TITLE,
+        COLUMN_NAME_RAW
+    )
 
 
 class SqliteRssStore(RssStore):
@@ -29,21 +39,22 @@ class SqliteRssStore(RssStore):
 
     def init_store(self):
         DEF_COL = ', '.join([
-            self.COLUMN_NAMES[0] + ' TEXT NOT NULL',
-            self.COLUMN_NAMES[1] + ' TEXT NOT NULL',
-            self.COLUMN_NAMES[2] + ' TEXT',
-            self.COLUMN_NAMES[3] + ' TEXT',
-            'PRIMARY KEY ({}, {})'.format(self.COLUMN_NAMES[0], self.COLUMN_NAMES[1]),
+            self.COLUMN_NAME_FEED_ID + ' TEXT NOT NULL',
+            self.COLUMN_NAME_RSS_ID  + ' TEXT NOT NULL',
+            self.COLUMN_NAME_TITLE   + ' TEXT',
+            self.COLUMN_NAME_RAW     + ' TEXT',
+            'PRIMARY KEY ({}, {})'.format(self.COLUMN_NAME_FEED_ID, self.COLUMN_NAME_RSS_ID),
         ])
         SQL_CREATE = 'CREATE TABLE IF NOT EXISTS {} ({});'.format(self.TABLE_NAME, DEF_COL)
         self._cur.execute(SQL_CREATE)
 
     def get_count(self) -> int:
-        SQL_COUNT = 'SELECT COUNT({}) FROM {}'.format(self.COLUMN_NAMES[0], self.TABLE_NAME)
+        SQL_COUNT = 'SELECT COUNT({}) FROM {}'.format(self.COLUMN_NAME_FEED_ID, self.TABLE_NAME)
         return self._cur.execute(SQL_COUNT).fetchone()[0]
 
     def upsert(self, items):
-        SQL_INSERT = 'INSERT OR IGNORE INTO {} VALUES ({});'.format(self.TABLE_NAME, ",".join("?" for _ in self.COLUMN_NAMES))
+        SQL_INSERT = 'INSERT OR IGNORE INTO {} VALUES ({});' \
+            .format(self.TABLE_NAME, ",".join("?" for _ in self.COLUMN_NAMES))
         self._cur.executemany(SQL_INSERT, items)
 
     def remove_old_items(self, kept_count: int):
@@ -53,7 +64,8 @@ class SqliteRssStore(RssStore):
         if max_rowid is None:
             # no items
             return 0
-        return self._cur.execute('DELETE FROM {} WHERE ROWID <= {}'.format(self.TABLE_NAME, max_rowid - kept_count)).rowcount
+        cur = self._cur.execute('DELETE FROM {} WHERE ROWID <= {}'.format(self.TABLE_NAME, max_rowid - kept_count))
+        return cur.rowcount
 
     def commit(self):
         self._conn.commit()
