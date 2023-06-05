@@ -52,6 +52,14 @@ class SqliteRssStore(RssStore):
         SQL_COUNT = 'SELECT COUNT({}) FROM {}'.format(self.COLUMN_NAME_FEED_ID, self.TABLE_NAME)
         return self._cur.execute(SQL_COUNT).fetchone()[0]
 
+    def get_min_id(self) -> int:
+        SQL_MIN = 'SELECT MIN(ROWID) FROM {}'.format(self.TABLE_NAME)
+        return self._cur.execute(SQL_MIN).fetchone()[0]
+
+    def get_max_id(self) -> int:
+        SQL_MIN = 'SELECT MAX(ROWID) FROM {}'.format(self.TABLE_NAME)
+        return self._cur.execute(SQL_MIN).fetchone()[0]
+
     def upsert(self, items):
         SQL_INSERT = 'INSERT OR IGNORE INTO {} VALUES ({});' \
             .format(self.TABLE_NAME, ",".join("?" for _ in self.COLUMN_NAMES))

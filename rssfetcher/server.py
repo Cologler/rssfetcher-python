@@ -32,11 +32,13 @@ def create_app(conf: ConfigHelper):
                 'items': readed_items[:limit],
             }
 
-    @app.get("/items-count")
-    async def get_items_count():
+    @app.get("/status")
+    async def get_status():
         with conf.open_store() as store:
             return {
-                'count': store.get_count()
+                'count': store.get_count(),
+                'min_id': store.get_min_id(),
+                'max_id': store.get_max_id(),
             }
 
     return app
