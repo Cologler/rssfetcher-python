@@ -2,13 +2,6 @@
 
 Fetch rss items into a sqlite database so you can do what you want later.
 
-Can use as a sync source for https://github.com/Cologler/RSSViewer.
-
-## How do I use
-
-0. add run script task to NAS task scheduler, 15min run once;
-0. use other app (like `RSSViewer`) to read database.
-
 ## Configuration
 
 Configuration file use yaml format.
