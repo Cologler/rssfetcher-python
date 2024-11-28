@@ -20,7 +20,8 @@ def create_app(conf: ConfigHelper):
     app.on_event("startup")(worker.start)
     app.on_event("shutdown")(worker.shutdown)
 
-    @app.get("/items/")
+    @app.head("/items")
+    @app.get("/items")
     async def get_items(start_rowid: int = 0, limit: int = None):
         limit_max = 1000
         limit = min(max(limit, 1), limit_max) if isinstance(limit, int) else limit_max
@@ -32,6 +33,7 @@ def create_app(conf: ConfigHelper):
                 'items': readed_items[:limit],
             }
 
+    @app.head("/status")
     @app.get("/status")
     async def get_status():
         with conf.open_store() as store:
