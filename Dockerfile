@@ -1,18 +1,38 @@
-FROM python:3.12-alpine
+FROM python:3.12.7-alpine AS python-base
 
-WORKDIR /usr/src/app
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=on \
+    POETRY_VIRTUALENVS_IN_PROJECT=true
 
-COPY requirements.txt requirements.txt
+
+FROM python-base AS poetry-base
+
+WORKDIR /app
+
+# setup poetry
+RUN --mount=type=cache,target=/root/.cache \
+    pip install --user poetry==1.8.4
+
+
+FROM poetry-base
+
+# install deps
+COPY pyproject.toml poetry.lock ./
+RUN --mount=type=cache,target=/root/.cache \
+    python -m poetry install --sync
+
+# copy src
 COPY rssfetcher rssfetcher
 
-RUN pip install --user -r requirements.txt
-RUN mkdir -p ~/.local/state/rssfetcher
-
+# configure app
 EXPOSE 8000
 
 ENV RSSFETCHER_CONFIG=/etc/rssfetcher/config.yml
 ENV UVICORN_HOST=0.0.0.0
 
-VOLUME /etc/rssfetcher
+VOLUME [ "/etc/rssfetcher", "/root/.local/state/rssfetcher" ]
 
-CMD [ "python", "-m", "uvicorn", "rssfetcher:app" ]
+# start
+ENTRYPOINT [ "python", "-m", "poetry", "run" ]
+CMD [ "fastapi", "run", "rssfetcher" ]
