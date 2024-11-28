@@ -14,11 +14,12 @@ from .cfg import ConfigHelper
 
 def create_app(conf: ConfigHelper):
 
-    app = FastAPI()
-
     worker = RssFetcherWorker(conf)
-    app.on_event("startup")(worker.start)
-    app.on_event("shutdown")(worker.shutdown)
+
+    app = FastAPI(
+        on_startup=[worker.start],
+        on_shutdown=[worker.shutdown],
+    )
 
     @app.head("/items")
     @app.get("/items")

@@ -5,22 +5,24 @@
 #
 # ----------
 
-from functools import cache
-from io import StringIO
-from urllib.parse import urlparse
-from time import monotonic, sleep
-from contextlib import suppress
-import os
-import xml.etree.ElementTree as et
 import logging
+import os
 import queue
 import threading
+import xml.etree.ElementTree as et
+from contextlib import suppress
+from functools import cache
+from io import StringIO
+from time import monotonic, sleep
+from urllib.parse import urlparse
 
 import requests
 import schedule
-from pydantic_settings import BaseSettings, SettingsError
+from pydantic import ValidationError
+from pydantic_settings import BaseSettings
 
 from .cfg import ConfigHelper, FeedSection
+
 
 @cache
 def get_logger():
@@ -216,7 +218,7 @@ def _main_base(argv):
     def _load_settings(argv):
         try:
             settings = Settings()
-        except SettingsError as e:
+        except ValidationError as e:
             get_logger().error(e)
             exit()
         return settings
