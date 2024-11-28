@@ -18,7 +18,7 @@ import threading
 
 import requests
 import schedule
-from pydantic import BaseSettings, ValidationError
+from pydantic_settings import BaseSettings, SettingsError
 
 from .cfg import ConfigHelper, FeedSection
 
@@ -216,7 +216,7 @@ def _main_base(argv):
     def _load_settings(argv):
         try:
             settings = Settings()
-        except ValidationError as e:
+        except SettingsError as e:
             get_logger().error(e)
             exit()
         return settings

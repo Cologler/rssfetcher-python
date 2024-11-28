@@ -11,8 +11,8 @@ python = "^3.8"
 PyYAML = "^6.0"
 requests = "^2.28.1"
 schedule = "^1.1.0"
-fastapi = "^0.85.0"
-uvicorn = {extras = ["standard"], version = "^0.18.3"}
+fastapi = {extras = ["standard"], version = "^0.115.5"}
+pydantic-settings = "^2.6.1"
 
 
 [tool.poetry.group.test.dependencies]
