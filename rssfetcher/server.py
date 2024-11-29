@@ -7,7 +7,7 @@
 
 import sys
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Response
 
 from .core import RssFetcherWorker, _main_base
 from .cfg import ConfigHelper
@@ -43,6 +43,11 @@ def create_app(conf: ConfigHelper):
                 'min_id': store.get_min_id(),
                 'max_id': store.get_max_id(),
             }
+
+    @app.head('/ping')
+    @app.get('/ping')
+    def ping():
+        return Response(status_code=200)
 
     return app
 
