@@ -18,3 +18,5 @@ docker-build:
 docker-export-image: docker-build
     mkdir -p dist
     docker save --output dist/rssfetcher-image.tar rssfetcher:dev
+    zstd -f dist/rssfetcher-image.tar -o dist/rssfetcher-image.tar.zst
+    rm dist/rssfetcher-image.tar
