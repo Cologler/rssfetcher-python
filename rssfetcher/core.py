@@ -28,14 +28,14 @@ from .cfg import ConfigHelper, FeedSection
 def get_logger():
     return logging.getLogger('rssfetcher')
 
-def dump_xml(el):
+def dump_xml(el: et.Element):
     sb = StringIO()
     tr = et.ElementTree(el)
     tr.write(sb, encoding='unicode', short_empty_elements=False)
     return sb.getvalue()
 
 def fetch_feed(feed_id: str, feed_section: FeedSection):
-    items = []
+    collected_items = []
     url = feed_section.get('url')
     if url and feed_section.get('enable', True):
         logger = get_logger().getChild(url)
@@ -76,20 +76,31 @@ def fetch_feed(feed_id: str, feed_section: FeedSection):
             except et.ParseError:
                 logger.error('invalid xml.')
             else:
+                def read_element_text(elements: list[et.Element | None] | et.Element | None):
+                    if not isinstance(elements, list):
+                        elements = [elements]
+                    for el in elements:
+                        if el is not None:
+                            return el.text
+
                 for item in el.iter('item'):
-                    rd = {
-                        'feed_id': feed_id,
-                        'rss_id': item.find('guid').text,
-                        'title': item.find('title').text,
-                        'pub_date': item.find('pubDate').text,
-                        'raw': dump_xml(item)
-                    }
-                    description = item.find('description')
-                    if description is not None:
-                        rd['description'] = description.text
-                    items.append(rd)
-                logger.info('total found %s items',len(items))
-    return items
+                    if unique_id := read_element_text([item.find('guid'), item.find('title')]):
+                        rd = {
+                            'feed_id': feed_id,
+                            'rss_id': unique_id,
+                            'title': read_element_text(item.find('title')),
+                            'pub_date': read_element_text(item.find('pubDate')),
+                            'raw': dump_xml(item)
+                        }
+                        if desc := item.find('description'):
+                            rd['description'] = desc.text
+                        collected_items.append(rd)
+                    else:
+                        logger.warning('item %r has no unique id', item)
+
+                logger.info('total found %s items',len(collected_items))
+
+    return collected_items
 
 def fetch_feeds(conf: ConfigHelper, feeds: list):
     options = conf.conf_data.get('options', {})
