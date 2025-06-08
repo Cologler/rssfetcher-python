@@ -127,7 +127,7 @@ def fetch_feeds(conf: ConfigHelper, feeds: list):
         count = store.get_count() - count
         get_logger().info('total added %s rss', count)
 
-        kept_count = options.get('kept_count')
+        kept_count = options.get('kept_count') if options else None
         if isinstance(kept_count, int) and kept_count >= 10: # hard limit
             removed_count = store.remove_old_items(kept_count)
         else:
@@ -218,17 +218,16 @@ def _main_base(argv):
     import yaml
 
     def configure_logger():
-        logging_options = dict(
+        logging.basicConfig(
             format='%(asctime)s [%(levelname)s] - %(name)s: %(message)s',
             datefmt='%m/%d/%Y %I:%M:%S %p',
             level=logging.INFO
         )
         get_logger().setLevel(logging.INFO)
-        logging.basicConfig(**logging_options)
 
     def _load_settings(argv):
         try:
-            settings = Settings()
+            settings = Settings() # type: ignore
         except ValidationError as e:
             get_logger().error(e)
             exit()
