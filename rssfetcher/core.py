@@ -208,8 +208,6 @@ class RssFetcherWorker:
             except KeyboardInterrupt:
                 pass
 
-        return job_queue
-
     def shutdown(self):
         self._job_queue.put(None)
         self._job_queue.join()

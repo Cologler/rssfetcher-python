@@ -6,6 +6,8 @@
 # ----------
 
 import sys
+from contextlib import asynccontextmanager
+
 
 from fastapi import FastAPI, Response
 
@@ -16,12 +18,15 @@ def create_app(config_helper: ConfigHelper):
 
     worker = RssFetcherWorker(config_helper)
 
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        config_helper.get_config().init_store()
+        worker.start()
+        yield
+        worker.shutdown()
+
     app = FastAPI(
-        on_startup=[
-            lambda: config_helper.get_config().init_store(),
-            worker.start,
-        ],
-        on_shutdown=[worker.shutdown],
+        lifespan=lifespan,
     )
 
     @app.head("/items")
