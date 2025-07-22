@@ -7,10 +7,11 @@
 
 import sys
 
-from .core import _main_base, fetch_feeds
+from .core import fetch_feeds, configure_logger, load_config_helper
 
 def fetch_once(argv = sys.argv):
-    conf = _main_base(argv[1:])
+    configure_logger()
+    conf = load_config_helper()
     try:
         fetch_feeds(conf, list(conf.iter_feeds()))
     except KeyboardInterrupt:

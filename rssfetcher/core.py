@@ -222,24 +222,23 @@ class Settings(BaseSettings):
     config: str | None = None
 
 
-def _main_base(argv):
+def configure_logger():
+    logging.basicConfig(
+        format='%(asctime)s [%(levelname)s] - %(name)s: %(message)s',
+        datefmt='%m/%d/%Y %I:%M:%S %p',
+        level=logging.INFO
+    )
+    get_logger().setLevel(logging.INFO)
 
-    def configure_logger():
-        logging.basicConfig(
-            format='%(asctime)s [%(levelname)s] - %(name)s: %(message)s',
-            datefmt='%m/%d/%Y %I:%M:%S %p',
-            level=logging.INFO
-        )
-        get_logger().setLevel(logging.INFO)
 
-    def _load_settings(argv):
+def load_config_helper():
+    def _load_settings():
         try:
             return Settings() # type: ignore
         except ValidationError as e:
             get_logger().error(e)
             exit()
 
-    configure_logger()
-    settings = _load_settings(argv)
+    settings = _load_settings()
     config_helper = ConfigHelper(settings.config)
     return config_helper

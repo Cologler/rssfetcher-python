@@ -7,6 +7,6 @@
 #   - requests
 # ----------
 
-if __name__ == 'rssfetcher':
-    from .server import default_app
-    app = default_app()
+from .server import app
+
+__all__ = ['app']
