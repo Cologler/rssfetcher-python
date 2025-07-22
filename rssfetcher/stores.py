@@ -7,6 +7,8 @@
 
 import sqlite3
 
+from .models import RssItemRowRecord
+
 
 class RssStore:
     COLUMN_NAME_FEED_ID = 'feed_id'
@@ -26,16 +28,37 @@ class SqliteRssStore(RssStore):
     TABLE_NAME = 'rss'
 
     def __init__(self, conn_str: str) -> None:
-        self._conn = sqlite3.connect(conn_str)
-        self._cur = None
+        self.__conn_str = conn_str
+        self.__conn: sqlite3.Connection | None = None
+        self.__cur: sqlite3.Cursor | None = None
 
     def __enter__(self):
-        self._cur = self._conn.cursor()
+        self.__conn = sqlite3.connect(self.__conn_str)
+        self.__cur = self.__conn.cursor()
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        self._cur and self._cur.close()
-        self._conn and self._conn.close()
+        if cur := self.__cur:
+            cur.close()
+        self.__cur = None
+
+        if conn := self.__conn:
+            conn.close()
+        self.__conn = None
+
+    @property
+    def _conn(self):
+        if conn := self.__conn:
+            return conn
+        # If connection is not initialized, raise an error
+        raise RuntimeError("Connection is not initialized")
+
+    @property
+    def _cur(self):
+        if cur := self.__cur:
+            return cur
+        # If cursor is not initialized, raise an error
+        raise RuntimeError("Cursor is not initialized")
 
     def init_store(self):
         DEF_COL = ', '.join([
@@ -60,10 +83,16 @@ class SqliteRssStore(RssStore):
         SQL_MIN = 'SELECT MAX(ROWID) FROM {}'.format(self.TABLE_NAME)
         return self._cur.execute(SQL_MIN).fetchone()[0]
 
-    def upsert(self, items):
+    def upsert(self, items: list[RssItemRowRecord]):
+        def torow(item: RssItemRowRecord | tuple) -> tuple:
+            if isinstance(item, dict):
+                return tuple(item.get(x) for x in self.COLUMN_NAMES)
+            assert len(item) == len(self.COLUMN_NAMES), "Item length does not match column names length"
+            return item
+        rows = [torow(item) for item in items]
         SQL_INSERT = 'INSERT OR IGNORE INTO {} VALUES ({});' \
             .format(self.TABLE_NAME, ",".join("?" for _ in self.COLUMN_NAMES))
-        self._cur.executemany(SQL_INSERT, items)
+        self._cur.executemany(SQL_INSERT, rows)
 
     def remove_old_items(self, kept_count: int):
         assert isinstance(kept_count, int) and kept_count > 0 # hard limit
@@ -83,7 +112,7 @@ class SqliteRssStore(RssStore):
             self.TABLE_NAME, start_rowid, limit
         )
 
-        self._cur.row_factory = sqlite3.Row
+        self._cur.row_factory = sqlite3.Row # type: ignore
         reader = self._cur.execute(sql)
         items = reader.fetchall()
         return items

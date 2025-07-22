@@ -22,6 +22,7 @@ from pydantic import ValidationError
 from pydantic_settings import BaseSettings
 
 from .cfg import ConfigHelper, FeedSection
+from .models import RssItemRowRecord
 
 
 @cache
@@ -35,7 +36,8 @@ def dump_xml(el: et.Element):
     return sb.getvalue()
 
 def fetch_feed(feed_id: str, feed_section: FeedSection):
-    collected_items = []
+    collected_items: list[RssItemRowRecord] = []
+
     url = feed_section.get('url')
     if url and feed_section.get('enable', True):
         logger = get_logger().getChild(url)
@@ -85,7 +87,7 @@ def fetch_feed(feed_id: str, feed_section: FeedSection):
 
                 for item in el.iter('item'):
                     if unique_id := read_element_text([item.find('guid'), item.find('title')]):
-                        rd = {
+                        rd: RssItemRowRecord = {
                             'feed_id': feed_id,
                             'rss_id': unique_id,
                             'title': read_element_text(item.find('title')),
@@ -107,15 +109,14 @@ def fetch_feeds(conf: ConfigHelper, feeds: list):
 
     with conf.open_store() as store:
         # fetch from internet:
-        fetched = []
+        fetched: list[RssItemRowRecord] = []
         for feed_id, feed_section in feeds:
             try:
                 items = fetch_feed(feed_id, feed_section)
             except Exception as error:
                 get_logger().error('fetch %r failure with %s', feed_id, error, exc_info=True)
             else:
-                for item in items:
-                    fetched.append(tuple(item.get(x) for x in store.COLUMN_NAMES))
+                fetched.extend(items)
 
         if not fetched:
             return
