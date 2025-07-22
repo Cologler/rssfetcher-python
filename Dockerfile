@@ -12,7 +12,7 @@ WORKDIR /app
 
 # setup poetry
 RUN --mount=type=cache,target=/root/.cache \
-    pip install --user poetry==1.8.4
+    pip install --user poetry==2.1.1
 
 
 FROM poetry-base
