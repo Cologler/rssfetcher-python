@@ -12,12 +12,15 @@ from fastapi import FastAPI, Response
 from .core import RssFetcherWorker, _main_base
 from .cfg import ConfigHelper
 
-def create_app(conf: ConfigHelper):
+def create_app(config_helper: ConfigHelper):
 
-    worker = RssFetcherWorker(conf)
+    worker = RssFetcherWorker(config_helper)
 
     app = FastAPI(
-        on_startup=[worker.start],
+        on_startup=[
+            lambda: config_helper.get_config().init_store(),
+            worker.start,
+        ],
         on_shutdown=[worker.shutdown],
     )
 
@@ -27,7 +30,7 @@ def create_app(conf: ConfigHelper):
         limit_max = 1000
         limit = min(max(limit, 1), limit_max) if isinstance(limit, int) else limit_max
 
-        with conf.open_store() as store:
+        with config_helper.open_store() as store:
             readed_items = store.read_items(start_rowid, limit + 1)
             return {
                 'end': len(readed_items) <= limit,
@@ -37,7 +40,7 @@ def create_app(conf: ConfigHelper):
     @app.head("/status")
     @app.get("/status")
     async def get_status():
-        with conf.open_store() as store:
+        with config_helper.open_store() as store:
             return {
                 'count': store.get_count(),
                 'min_id': store.get_min_id(),

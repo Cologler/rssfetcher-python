@@ -6,11 +6,9 @@
 # ----------
 
 import logging
-import os
 import queue
 import threading
 import xml.etree.ElementTree as et
-from contextlib import suppress
 from functools import cache
 from io import StringIO
 from time import monotonic, sleep
@@ -105,7 +103,7 @@ def fetch_feed(feed_id: str, feed_section: FeedSection):
     return collected_items
 
 def fetch_feeds(conf: ConfigHelper, feeds: list):
-    options = conf.conf_data.get('options', {})
+    options = conf.get_config().config_data.get('options', {})
 
     with conf.open_store() as store:
         # fetch from internet:
@@ -140,13 +138,13 @@ def fetch_feeds(conf: ConfigHelper, feeds: list):
 
 class RssFetcherWorker:
     def __init__(self, conf: ConfigHelper) -> None:
-        self._conf = conf
+        self._config_helper = conf
         self._job_queue = queue.Queue()
 
     def start(self):
         job_queue = self._job_queue
 
-        for feed_id, feed_section in self._conf.iter_feeds():
+        for feed_id, feed_section in self._config_helper.iter_feeds():
             job_args = (feed_id, feed_section)
             minutes = max(feed_section.get('interval', 15), 5)
             schedule.every(minutes).minutes.do(job_queue.put, job_args)
@@ -187,7 +185,7 @@ class RssFetcherWorker:
                         unique_feeds = list(filter_unique_feeds(feeds))
                         get_logger().info('Receive %d fetch jobs.', len(unique_feeds))
                         assert unique_feeds
-                        fetch_feeds(self._conf, unique_feeds)
+                        fetch_feeds(self._config_helper, unique_feeds)
                 finally:
                     for _ in range(len(feeds)):
                         job_queue.task_done()
@@ -209,14 +207,13 @@ class RssFetcherWorker:
 
 
 class Settings(BaseSettings):
-    config: str
+    config: str | None = None
 
     class Config:
         env_prefix = 'RSSFETCHER_'
 
 
 def _main_base(argv):
-    import yaml
 
     def configure_logger():
         logging.basicConfig(
@@ -228,29 +225,12 @@ def _main_base(argv):
 
     def _load_settings(argv):
         try:
-            settings = Settings() # type: ignore
+            return Settings() # type: ignore
         except ValidationError as e:
             get_logger().error(e)
             exit()
-        return settings
-
-    def _load_config(conf_path: str) -> dict:
-        if os.path.isfile(conf_path):
-            with suppress(FileNotFoundError):
-                with open(conf_path, mode='r', encoding='utf8') as fp:
-                    data = yaml.safe_load(fp)
-                    get_logger().info('Load config from %s', conf_path)
-                    return data
-            get_logger().error('Unable open file: %s', conf_path)
-        else:
-            get_logger().error('No such file: %s', conf_path)
-        exit(1)
 
     configure_logger()
     settings = _load_settings(argv)
-    conf_data = _load_config(settings.config)
-    conf = ConfigHelper(conf_data)
-    with conf.open_store() as store:
-        store.init_store()
-        store.commit()
-    return conf
+    config_helper = ConfigHelper(settings.config)
+    return config_helper
