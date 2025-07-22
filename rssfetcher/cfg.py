@@ -5,10 +5,11 @@
 #
 # ----------
 
-from typing import TypedDict, Tuple, Dict, Optional, Iterable
 from collections import ChainMap
+from typing import Dict, Iterable, NotRequired, Optional, Tuple, TypedDict
 
 from .stores import open_store
+
 
 class ConfigError(Exception):
     pass
@@ -18,12 +19,12 @@ class ProxiesSection(TypedDict):
 
 class FeedSection(TypedDict):
     url: str
-    enable: Optional[bool]
-    proxy: Optional[str]
-    proxies: Optional[Dict[str, str]]
+    enable: NotRequired[bool]
+    proxy: NotRequired[str]
+    proxies: NotRequired[Dict[str, str]]
 
 class OptionsSection(TypedDict):
-    kept_count: Optional[int]
+    kept_count: NotRequired[int]
 
 class RootSection(TypedDict):
     database: Optional[str]
