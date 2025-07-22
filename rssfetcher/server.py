@@ -16,11 +16,10 @@ from .cfg import ConfigHelper
 
 def create_app(config_helper: ConfigHelper):
 
-    worker = RssFetcherWorker(config_helper)
-
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         config_helper.get_config().init_store()
+        worker = RssFetcherWorker(config_helper)
         worker.start()
         yield
         worker.shutdown()
