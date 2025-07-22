@@ -20,7 +20,7 @@ FROM poetry-base
 # install deps
 COPY pyproject.toml poetry.lock ./
 RUN --mount=type=cache,target=/root/.cache \
-    python -m poetry install --sync
+    python -m poetry install --sync --no-root
 
 # copy src
 COPY rssfetcher rssfetcher
