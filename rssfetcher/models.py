@@ -11,5 +11,5 @@ from typing import TypedDict
 class RssItemRowRecord(TypedDict):
     feed_id: str
     rss_id: str
-    title: str
+    title: str | None
     raw: str

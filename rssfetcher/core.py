@@ -33,6 +33,33 @@ def dump_xml(el: et.Element):
     tr.write(sb, encoding='unicode', short_empty_elements=False)
     return sb.getvalue()
 
+def _read_element_text(elements: list[et.Element | None] | et.Element | None):
+    '''
+    Read text from an element or a list of elements.
+    '''
+    if elements is not None:
+        if not isinstance(elements, list):
+            elements = [elements]
+        for el in elements:
+            if el is not None:
+                return el.text
+
+def _element_to_RssItemRowRecord(feed_id: str, item: et.Element, *, logger: logging.Logger) -> RssItemRowRecord | None:
+    '''
+    Convert an XML item element to a RssItemRowRecord.
+    '''
+    if unique_id := _read_element_text([item.find('guid'), item.find('title')]):
+        rd: RssItemRowRecord = {
+            'feed_id': feed_id,
+            'rss_id': unique_id,
+            'title': _read_element_text(item.find('title')),
+            'raw': dump_xml(item)
+        }
+        return rd
+    else:
+        logger.warning('item %r has no unique id', item)
+        return None
+
 def fetch_feed(feed_id: str, feed_section: FeedSection):
     collected_items: list[RssItemRowRecord] = []
 
@@ -76,27 +103,9 @@ def fetch_feed(feed_id: str, feed_section: FeedSection):
             except et.ParseError:
                 logger.error('invalid xml.')
             else:
-                def read_element_text(elements: list[et.Element | None] | et.Element | None):
-                    if not isinstance(elements, list):
-                        elements = [elements]
-                    for el in elements:
-                        if el is not None:
-                            return el.text
-
                 for item in el.iter('item'):
-                    if unique_id := read_element_text([item.find('guid'), item.find('title')]):
-                        rd: RssItemRowRecord = {
-                            'feed_id': feed_id,
-                            'rss_id': unique_id,
-                            'title': read_element_text(item.find('title')),
-                            'pub_date': read_element_text(item.find('pubDate')),
-                            'raw': dump_xml(item)
-                        }
-                        if desc := item.find('description'):
-                            rd['description'] = desc.text
+                    if rd := _element_to_RssItemRowRecord(feed_id, item, logger=logger):
                         collected_items.append(rd)
-                    else:
-                        logger.warning('item %r has no unique id', item)
 
                 logger.info('total found %s items',len(collected_items))
 
