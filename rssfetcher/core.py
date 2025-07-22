@@ -214,10 +214,11 @@ class RssFetcherWorker:
 
 
 class Settings(BaseSettings):
-    config: str | None = None
+    model_config = {
+        'env_prefix': 'RSSFETCHER_',
+    }
 
-    class Config:
-        env_prefix = 'RSSFETCHER_'
+    config: str | None = None
 
 
 def _main_base(argv):
