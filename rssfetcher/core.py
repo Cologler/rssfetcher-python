@@ -111,31 +111,31 @@ def fetch_feed(feed_id: str, feed_section: FeedSection):
 
     return collected_items
 
-def fetch_feeds(conf: ConfigHelper, feeds: list):
-    options = conf.get_config().config_data.get('options', {})
+def fetch_feeds(config_helper: ConfigHelper, feeds: list):
+    options = config_helper.get_config().config_data.get('options', {})
+    kept_count = options.get('kept_count') if options else None
 
-    with conf.open_store() as store:
-        # fetch from internet:
-        fetched: list[RssItemRowRecord] = []
-        for feed_id, feed_section in feeds:
-            try:
-                items = fetch_feed(feed_id, feed_section)
-            except Exception as error:
-                get_logger().error('fetch %r failure with %s', feed_id, error, exc_info=True)
-            else:
-                fetched.extend(items)
+    # fetch from internet:
+    fetched: list[RssItemRowRecord] = []
+    for feed_id, feed_section in feeds:
+        try:
+            items = fetch_feed(feed_id, feed_section)
+        except Exception as error:
+            get_logger().error('fetch %r failure with %s', feed_id, error, exc_info=True)
+        else:
+            fetched.extend(items)
 
-        if not fetched:
-            return
+    if not fetched:
+        return
 
+    with config_helper.open_store() as store:
         # save:
         count = store.get_count()
-
         store.upsert(fetched)
         count = store.get_count() - count
         get_logger().info('total added %s rss', count)
 
-        kept_count = options.get('kept_count') if options else None
+        # remove old items:
         if isinstance(kept_count, int) and kept_count >= 10: # hard limit
             removed_count = store.remove_old_items(kept_count)
         else:
@@ -144,11 +144,12 @@ def fetch_feeds(conf: ConfigHelper, feeds: list):
 
         store.commit()
 
+type _JobQueueItem = tuple[str, FeedSection]
 
 class RssFetcherWorker:
     def __init__(self, conf: ConfigHelper) -> None:
         self._config_helper = conf
-        self._job_queue = queue.Queue()
+        self._job_queue: queue.Queue[_JobQueueItem | None] = queue.Queue()
 
     def start(self):
         job_queue = self._job_queue
