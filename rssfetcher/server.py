@@ -23,7 +23,7 @@ def create_app(conf: ConfigHelper):
 
     @app.head("/items")
     @app.get("/items")
-    async def get_items(start_rowid: int = 0, limit: int = None):
+    async def get_items(start_rowid: int = 0, limit: int | None = None):
         limit_max = 1000
         limit = min(max(limit, 1), limit_max) if isinstance(limit, int) else limit_max
 
