@@ -1,5 +1,5 @@
-database: rss.sqlite3
+database: rssfetcher.sqlite3
 feeds:
     share.dmhy.org:
         url: http://dmhy.org/topics/rss/rss.xml
-        proxy: http://127.0.0.1:1200
+        proxy: http://127.0.0.1:3000
