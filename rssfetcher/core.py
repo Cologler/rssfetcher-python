@@ -15,12 +15,12 @@ from time import monotonic, sleep
 from urllib.parse import urlparse
 
 import requests
-from schedule import Scheduler
 from pydantic import ValidationError
-from pydantic_settings import BaseSettings
+from schedule import Scheduler
 
 from .cfg import ConfigHelper, FeedSection
 from .models import RssItemRowRecord
+from .settings import Settings
 
 
 @cache
@@ -223,14 +223,6 @@ class RssFetcherWorker:
         self._is_shutdown = True
         self._job_queue.put(None)
         self._job_queue.join()
-
-
-class Settings(BaseSettings):
-    model_config = {
-        'env_prefix': 'RSSFETCHER_',
-    }
-
-    config: str | None = None
 
 
 def configure_logger():
