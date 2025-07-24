@@ -15,7 +15,7 @@ from time import monotonic, sleep
 from urllib.parse import urlparse
 
 import requests
-import schedule
+from schedule import Scheduler
 from pydantic import ValidationError
 from pydantic_settings import BaseSettings
 
@@ -150,44 +150,41 @@ class RssFetcherWorker:
     def __init__(self, conf: ConfigHelper) -> None:
         self._config_helper = conf
         self._job_queue: queue.Queue[_JobQueueItem | None] = queue.Queue()
+        self._is_shutdown = False
+        self._scheduler = Scheduler()
 
     def start(self):
         job_queue = self._job_queue
-
-        for feed_id, feed_section in self._config_helper.iter_feeds():
-            job_args = (feed_id, feed_section)
-            minutes = max(feed_section.get('interval', 15), 5)
-            schedule.every(minutes).minutes.do(job_queue.put, job_args)
-            job_queue.put(job_args)
+        scheduler = self._scheduler
 
         def run_on_background(func):
             threading.Thread(target=func, daemon=True).start()
 
-        def filter_unique_feeds(feeds):
-            s = set()
-            for f in feeds:
-                if f[0] not in s:
-                    s.add(f[0])
-                    yield f
-
-        def get_feeds_in_10s():
-            feeds = [job_queue.get()]
-            start = monotonic()
-            wait_time = 10
-            while wait_time > 0:
-                if feeds[-1] is None:
-                    break
-                try:
-                    last = job_queue.get(timeout=wait_time)
-                except queue.Empty:
-                    break
-                else:
-                    feeds.append(last)
-                wait_time = start + 10 - monotonic()
-            return feeds
-
         @run_on_background
-        def worker_main():
+        def consumer():
+            def filter_unique_feeds(feeds):
+                s = set()
+                for f in feeds:
+                    if f[0] not in s:
+                        s.add(f[0])
+                        yield f
+
+            def get_feeds_in_10s():
+                feeds = [job_queue.get()]
+                start = monotonic()
+                wait_time = 10
+                while wait_time > 0:
+                    if feeds[-1] is None:
+                        break
+                    try:
+                        last = job_queue.get(timeout=wait_time)
+                    except queue.Empty:
+                        break
+                    else:
+                        feeds.append(last)
+                    wait_time = start + 10 - monotonic()
+                return feeds
+
             while True:
                 feeds = get_feeds_in_10s()
                 try:
@@ -201,15 +198,29 @@ class RssFetcherWorker:
                         job_queue.task_done()
 
         @run_on_background
-        def schedule_main():
+        def producer():
+            def put_job(job: _JobQueueItem):
+                if not self._is_shutdown:
+                    job_queue.put(job)
+                else:
+                    scheduler.clear()
+
+            for feed_id, feed_section in self._config_helper.iter_feeds():
+                job_args: _JobQueueItem = (feed_id, feed_section)
+                minutes = max(feed_section.get('interval', 15), 5)
+                scheduler.every(minutes).minutes.do(put_job, job_args)
+                put_job(job_args)
+
             try:
-                while schedule.idle_seconds() is not None:
-                    schedule.run_pending()
+                while scheduler.idle_seconds is not None:
+                    scheduler.run_pending()
                     sleep(1)
             except KeyboardInterrupt:
                 pass
 
     def shutdown(self):
+        get_logger().info('Shutting down RssFetcherWorker...')
+        self._is_shutdown = True
         self._job_queue.put(None)
         self._job_queue.join()
 
