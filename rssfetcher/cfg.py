@@ -48,9 +48,11 @@ class Config:
     def __init__(self, config_data: RootSection) -> None:
         self.config_data: RootSection = config_data
 
+    def get_conn_str(self) -> str:
+        return self.config_data.get('database') or 'rss.sqlite3'
+
     def open_store(self):
-        conn_str = self.config_data.get('database') or 'rss.sqlite3'
-        return open_store(conn_str)
+        return open_store(self.get_conn_str())
 
     def init_store(self):
         with self.open_store() as store:
@@ -95,4 +97,7 @@ class ConfigHelper:
             if self.__config_path is None:
                 raise ConfigError('Config path is not set.')
             self.__config = Config(self._load_config_from_path(self.__config_path))
+            logger.info('Config loaded from %s', self.__config_path)
+            logger.info('Database: %s', self.__config.get_conn_str())
+
         return self.__config
