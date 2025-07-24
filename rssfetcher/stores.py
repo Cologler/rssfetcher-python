@@ -33,7 +33,7 @@ class SqliteRssStore(RssStore):
         self.__cur: sqlite3.Cursor | None = None
 
     def __enter__(self):
-        self.__conn = sqlite3.connect(self.__conn_str)
+        self.__conn = sqlite3.connect(self.__conn_str, check_same_thread=False)
         self.__cur = self.__conn.cursor()
         return self
 

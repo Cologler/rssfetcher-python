@@ -5,38 +5,50 @@
 #
 # ----------
 
-from contextlib import asynccontextmanager, contextmanager
+from contextlib import asynccontextmanager
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, FastAPI, Request, Response
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request, Response, status
+from fastapi.security import APIKeyHeader, APIKeyQuery
 
 from .cfg import Config
 from .core import RssFetcherWorker, configure_logger, load_config_helper
+from .settings import SettingsDeps
 from .stores import SqliteRssStore
 
 
 def _get_config_from_request(request: Request):
     return request.app.state.config_helper.get_config()
 
+ConfigDeps = Annotated[Config, Depends(_get_config_from_request)]
 
-ConfigType = Annotated[Config, Depends(_get_config_from_request)]
-
-
-@contextmanager
-def _open_store(config: ConfigType):
+def _open_store(config: ConfigDeps):
     with config.open_store() as store:
         yield store
 
+StoreDeps = Annotated[SqliteRssStore, Depends(_open_store, use_cache=False)]
 
-StoreType = Annotated[SqliteRssStore, Depends(_open_store)]
+
+def _verify_api_key(
+    settings: SettingsDeps,
+    header_api_key: Annotated[str | None, Depends(APIKeyHeader(name="x-key", auto_error=False))],
+    query_api_key: Annotated[str | None, Depends(APIKeyQuery(name="api_key", auto_error=False))],
+):
+    print(header_api_key, query_api_key)
+    if secret_key := settings.secret_key:
+        if not header_api_key and not query_api_key:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authenticated")
+        if secret_key not in (header_api_key, query_api_key):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid API key")
+
 
 router = APIRouter()
 
 
-@router.head("/items")
-@router.get("/items")
+@router.head("/items", dependencies=[Depends(_verify_api_key)])
+@router.get("/items", dependencies=[Depends(_verify_api_key)])
 async def get_items(
-    store: StoreType,
+    store: StoreDeps,
     start_rowid: int = 0, limit: int | None = None,
 ):
     limit_max = 1000
@@ -50,10 +62,10 @@ async def get_items(
     }
 
 
-@router.head("/status")
-@router.get("/status")
+@router.head("/status", dependencies=[Depends(_verify_api_key)])
+@router.get("/status", dependencies=[Depends(_verify_api_key)])
 async def get_status(
-    store: StoreType,
+    store: StoreDeps,
 ):
     return {
         'count': store.get_count(),
@@ -77,13 +89,14 @@ async def lifespan(app: FastAPI):
     app.state.config_helper = config_helper
 
     worker = RssFetcherWorker(config_helper)
+
     worker.start()
-
-    yield
-
-    worker.shutdown()
+    try:
+        yield
+    finally:
+        worker.shutdown()
 
 app = FastAPI(
     lifespan=lifespan,
 )
-app.add_api_route('', router)
+app.include_router(router)

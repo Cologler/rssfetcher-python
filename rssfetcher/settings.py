@@ -23,4 +23,4 @@ def load_settings() -> Settings:
     return Settings()
 
 # error if use Depends(Settings)
-SettingsType = Annotated[Settings, Depends(load_settings)]
+SettingsDeps = Annotated[Settings, Depends(load_settings)]
