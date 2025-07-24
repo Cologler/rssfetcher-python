@@ -19,5 +19,8 @@ class Settings(BaseSettings):
     config: str | None = None
     secret_key: str | None = None
 
+def load_settings() -> Settings:
+    return Settings()
 
-SettingsType = Annotated[Settings, Depends(Settings)]
+# error if use Depends(Settings)
+SettingsType = Annotated[Settings, Depends(load_settings)]
