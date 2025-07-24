@@ -5,6 +5,9 @@ app_name := 'rssfetcher'
 fetch:
     poetry run python -m rssfetcher
 
+dev:
+    poetry run fastapi dev rssfetcher
+
 start:
     poetry run uvicorn rssfetcher:app
 
