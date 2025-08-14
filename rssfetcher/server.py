@@ -56,7 +56,7 @@ async def get_items(
     limit = min(max(limit, 1), limit_max) if isinstance(
         limit, int) else limit_max
 
-    readed_items = store.read_items(start_rowid, limit + 1)
+    readed_items = store.read_items_as_dict(start_rowid, limit + 1)
     return {
         'end': len(readed_items) <= limit,
         'items': readed_items[:limit],

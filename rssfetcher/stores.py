@@ -107,7 +107,7 @@ class SqliteRssStore(RssStore):
     def commit(self):
         self._conn.commit()
 
-    def read_items(self, start_rowid: int, limit: int):
+    def read_items(self, start_rowid: int, limit: int) -> list[sqlite3.Row]:
         sql = 'SELECT ROWID, * FROM {} WHERE ROWID > {} ORDER BY ROWID LIMIT {}'.format(
             self.TABLE_NAME, start_rowid, limit
         )
@@ -116,6 +116,9 @@ class SqliteRssStore(RssStore):
         reader = self._cur.execute(sql)
         items = reader.fetchall()
         return items
+
+    def read_items_as_dict(self, start_rowid: int, limit: int) -> list[dict[str, object]]:
+        return [dict(x) for x in self.read_items(start_rowid=start_rowid, limit=limit)]
 
 
 def open_store(conn_str: str):
