@@ -9,9 +9,11 @@ import logging
 import queue
 import threading
 import xml.etree.ElementTree as et
+from collections.abc import Iterable
 from functools import cache
 from io import StringIO
 from time import monotonic, sleep
+from typing import cast
 from urllib.parse import urlparse
 
 import requests
@@ -24,16 +26,16 @@ from .settings import Settings
 
 
 @cache
-def get_logger():
+def get_logger() -> logging.Logger:
     return logging.getLogger('rssfetcher')
 
-def dump_xml(el: et.Element):
+def dump_xml(el: et.Element) -> str:
     sb = StringIO()
     tr = et.ElementTree(el)
     tr.write(sb, encoding='unicode', short_empty_elements=False)
     return sb.getvalue()
 
-def _read_element_text(elements: list[et.Element | None] | et.Element | None):
+def _read_element_text(elements: list[et.Element | None] | et.Element | None) -> str | None:
     '''
     Read text from an element or a list of elements.
     '''
@@ -60,7 +62,7 @@ def _element_to_RssItemRowRecord(feed_id: str, item: et.Element, *, logger: logg
         logger.warning('item %r has no unique id', item)
         return None
 
-def fetch_feed(feed_id: str, feed_section: FeedSection):
+def fetch_feed(feed_id: str, feed_section: FeedSection) -> Iterable[RssItemRowRecord]:
     collected_items: list[RssItemRowRecord] = []
 
     url = feed_section.get('url')
@@ -111,7 +113,7 @@ def fetch_feed(feed_id: str, feed_section: FeedSection):
 
     return collected_items
 
-def fetch_feeds(config_helper: ConfigHelper, feeds: list):
+def fetch_feeds(config_helper: ConfigHelper, feeds: list[tuple[str, FeedSection]]) -> None:
     options = config_helper.get_config().config_data.get('options', {})
     kept_count = options.get('kept_count') if options else None
 
@@ -153,15 +155,15 @@ class RssFetcherWorker:
         self._is_shutdown = False
         self._scheduler = Scheduler()
 
-    def start(self):
+    def start(self) -> None:
         job_queue = self._job_queue
         scheduler = self._scheduler
 
-        def run_on_background(func):
+        def run_on_background(func) -> None:
             threading.Thread(target=func, daemon=True).start()
 
         @run_on_background
-        def consumer():
+        def consumer() -> None:
             def filter_unique_feeds(feeds):
                 s = set()
                 for f in feeds:
@@ -169,7 +171,7 @@ class RssFetcherWorker:
                         s.add(f[0])
                         yield f
 
-            def get_feeds_in_10s():
+            def get_feeds_in_10s() -> list[_JobQueueItem | None]:
                 feeds = [job_queue.get()]
                 start = monotonic()
                 wait_time = 10
@@ -189,17 +191,19 @@ class RssFetcherWorker:
                 feeds = get_feeds_in_10s()
                 try:
                     if None not in feeds:
-                        unique_feeds = list(filter_unique_feeds(feeds))
+                        unique_feeds = cast(list[tuple[str, FeedSection]], list(filter_unique_feeds(feeds)))
                         get_logger().info('Receive %d fetch jobs.', len(unique_feeds))
                         assert unique_feeds
                         fetch_feeds(self._config_helper, unique_feeds)
+                    else:
+                        return # end
                 finally:
                     for _ in range(len(feeds)):
                         job_queue.task_done()
 
         @run_on_background
-        def producer():
-            def put_job(job: _JobQueueItem):
+        def producer() -> None:
+            def put_job(job: _JobQueueItem) -> None:
                 if not self._is_shutdown:
                     job_queue.put(job)
                 else:
@@ -218,14 +222,14 @@ class RssFetcherWorker:
             except KeyboardInterrupt:
                 pass
 
-    def shutdown(self):
+    def shutdown(self) -> None:
         get_logger().info('Shutting down RssFetcherWorker...')
         self._is_shutdown = True
         self._job_queue.put(None)
         self._job_queue.join()
 
 
-def configure_logger():
+def configure_logger() -> None:
     logging.basicConfig(
         format='%(asctime)s [%(levelname)s] - %(name)s: %(message)s',
         datefmt='%m/%d/%Y %I:%M:%S %p',
@@ -234,8 +238,8 @@ def configure_logger():
     get_logger().setLevel(logging.INFO)
 
 
-def load_config_helper():
-    def _load_settings():
+def load_config_helper() -> ConfigHelper:
+    def _load_settings() -> Settings:
         try:
             return Settings() # type: ignore
         except ValidationError as e:
