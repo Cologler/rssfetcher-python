@@ -46,8 +46,9 @@ class RootSection(TypedDict):
 
 
 class Config:
-    def __init__(self, config_data: RootSection) -> None:
+    def __init__(self, config_data: RootSection, *, mtime_ns: int) -> None:
         self.config_data: RootSection = config_data
+        self.mtime_ns = mtime_ns
         self._cache = {}
 
     def get_conn_str(self) -> str:
@@ -75,33 +76,71 @@ class ConfigHelper:
         self.__config_path = config_path
         self.__config: Config | None = None
 
+    @property
+    def config_path(self) -> str:
+        if (config_path := self.__config_path) is None:
+            raise ConfigError('Config path is not set.')
+        return config_path
+
     def open_store(self) -> SqliteRssStore:
         return self.get_config().open_store()
 
     def iter_feeds(self) -> Iterable[Tuple[str, FeedSection]]:
         yield from self.get_config().iter_feeds()
 
-    def _load_config_from_path(self, path: str) -> RootSection:
+    def _load_config(self, path: str) -> Config | None:
+        config_content: RootSection | None = None
+        mtime_ns = -1
+
         if os.path.isfile(path):
             with suppress(FileNotFoundError):
                 with open(path, mode='r', encoding='utf8') as fp:
-                    data = yaml.safe_load(fp)
+                    config_content = yaml.safe_load(fp)
+                    mtime_ns = os.stat(fp.fileno()).st_mtime_ns
                     logger.info('Load config from %s', path)
-                    return data
-            logger.error('Unable open file: %s', path)
+            logger.warning('Unable open file: %s', path)
         else:
-            logger.error('No such file: %s', path)
-        exit(1)
+            logger.warning('No such file: %s', path)
+
+        if config_content is not None:
+            return Config(config_content, mtime_ns=mtime_ns)
+
+    def reload_config(self) -> bool:
+        config_path = self.config_path
+
+        if (config := self._load_config(config_path)) is not None:
+            self.__config = config
+            logger.info('Config loaded from %s', config_path)
+            logger.info('Database: %s', config.get_conn_str())
+            return True
+
+        return False
+
+    def reload_config_if_updated(self) -> bool:
+        '''
+        Return True if updated and reloaded.
+        '''
+        config_path = self.config_path
+
+        with suppress(FileNotFoundError):
+            mtime_ns = os.stat(config_path).st_mtime_ns
+            if mtime_ns != self.get_config().mtime_ns:
+                logger.info('Config file (%s) is updated, try reload...', config_path)
+                if self.reload_config():
+                    logger.info('Reload completed')
+                    return True
+                else:
+                    logger.warning('Reload failed')
+
+        return False
 
     def get_config(self) -> Config:
         '''
         Get config snapshot.
         '''
         if self.__config is None:
-            if self.__config_path is None:
-                raise ConfigError('Config path is not set.')
-            self.__config = Config(self._load_config_from_path(self.__config_path))
-            logger.info('Config loaded from %s', self.__config_path)
-            logger.info('Database: %s', self.__config.get_conn_str())
+            if not self.reload_config():
+                raise ConfigError('Unable load config')
+            assert self.__config is not None
 
         return self.__config

@@ -20,7 +20,7 @@ import requests
 from pydantic import ValidationError
 from schedule import Scheduler
 
-from .cfg import ConfigHelper, FeedSection
+from .cfg import Config, ConfigHelper, FeedSection
 from .models import RssItemRowRecord
 from .settings import Settings
 
@@ -149,15 +149,17 @@ def fetch_feeds(config_helper: ConfigHelper, feeds: list[tuple[str, FeedSection]
 type _JobQueueItem = tuple[str, FeedSection]
 
 class RssFetcherWorker:
-    def __init__(self, conf: ConfigHelper) -> None:
-        self._config_helper = conf
+    def __init__(self, config_helper: ConfigHelper) -> None:
+        self._config_helper = config_helper
         self._job_queue: queue.Queue[_JobQueueItem | None] = queue.Queue()
         self._is_shutdown = False
         self._scheduler = Scheduler()
 
     def start(self) -> None:
+        config_helper = self._config_helper
         job_queue = self._job_queue
         scheduler = self._scheduler
+        logger = get_logger()
 
         def run_on_background(func) -> None:
             threading.Thread(target=func, daemon=True).start()
@@ -203,17 +205,50 @@ class RssFetcherWorker:
 
         @run_on_background
         def producer() -> None:
-            def put_job(job: _JobQueueItem) -> None:
-                if not self._is_shutdown:
-                    job_queue.put(job)
-                else:
-                    scheduler.clear()
+            local_snapshot: dict[str, FeedSection] = {}
+            local_config: Config | None = None
 
-            for feed_id, feed_section in self._config_helper.iter_feeds():
-                job_args: _JobQueueItem = (feed_id, feed_section)
-                minutes = max(feed_section.get('interval', 15), 5)
-                scheduler.every(minutes).minutes.do(put_job, job_args)
-                put_job(job_args)
+            def put_job(job: _JobQueueItem, /) -> None:
+                if self._is_shutdown:
+                    scheduler.clear()
+                elif config_helper.reload_config_if_updated():
+                    logger.info('Config reloaded. Cancel current job %s, try reschedule...', job[0])
+                    update_from_config(config_helper.get_config())
+                else:
+                    job_queue.put(job)
+
+            def update_from_config(config: Config) -> None:
+                nonlocal local_config
+                local_config = config
+
+                feeds_map = {x[0]: x[1] for x in config.iter_feeds()}
+                feeds_ids = set(feeds_map)
+
+                # del removed
+                for feed_id in (set(local_snapshot) - feeds_ids):
+                    logger.info('Config updated: removed %s.', feed_id)
+                    scheduler.clear(tag=feed_id)
+                    del local_snapshot[feed_id]
+
+                # update changed
+                for feed_id, feed in feeds_map.items():
+                    if local_snapshot.get(feed_id) != feed:
+                        logger.info('Config updated: upsert %s.', feed_id)
+                        scheduler.clear(tag=feed_id)
+                        local_snapshot[feed_id] = feed
+
+                        job_args: _JobQueueItem = (feed_id, feed)
+                        if isinstance(interval := feed.get('interval', 15), int):
+                            minutes = max(interval, 5)
+                        else:
+                            minutes = 15
+                        scheduler.every(minutes).minutes.do(put_job, job_args).tag(feed_id)
+                        put_job(job_args) # put now
+
+                assert len(scheduler.jobs) == len(feeds_map)
+                logger.info('Totally %d jobs are scheduled.', len(scheduler.jobs))
+
+            update_from_config(config_helper.get_config())
 
             try:
                 while scheduler.idle_seconds is not None:
