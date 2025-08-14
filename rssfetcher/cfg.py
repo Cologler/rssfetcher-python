@@ -59,6 +59,9 @@ class Config:
 
     @cachedmethod(cache=lambda x: x._cache)
     def init_store(self) -> None:
+        '''
+        This method is cached so it is safe to call multi times.
+        '''
         logger.info('Init store at %s', self.get_conn_str())
         with self.open_store() as store:
             store.init_store()
@@ -109,9 +112,14 @@ class ConfigHelper:
         config_path = self.config_path
 
         if (config := self._load_config(config_path)) is not None:
+            is_store_updated = self.__config is None or self.__config.get_conn_str() != config.get_conn_str()
             self.__config = config
             logger.info('Config loaded from %s', config_path)
             logger.info('Database: %s', config.get_conn_str())
+            if is_store_updated:
+                config.init_store()
+            else:
+                logger.info('Database connect string not changed, skip init.')
             return True
 
         return False
