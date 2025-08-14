@@ -12,8 +12,9 @@ from logging import getLogger
 from typing import Dict, Iterable, NotRequired, Optional, Tuple, TypedDict
 
 import yaml
+from cachetools import cachedmethod
 
-from .stores import open_store
+from .stores import SqliteRssStore, open_store
 
 logger = getLogger(__name__)
 
@@ -47,14 +48,17 @@ class RootSection(TypedDict):
 class Config:
     def __init__(self, config_data: RootSection) -> None:
         self.config_data: RootSection = config_data
+        self._cache = {}
 
     def get_conn_str(self) -> str:
         return self.config_data.get('database') or 'rss.sqlite3'
 
-    def open_store(self):
+    def open_store(self) -> SqliteRssStore:
         return open_store(self.get_conn_str())
 
-    def init_store(self):
+    @cachedmethod(cache=lambda x: x._cache)
+    def init_store(self) -> None:
+        logger.info('Init store at %s', self.get_conn_str())
         with self.open_store() as store:
             store.init_store()
             store.commit()
@@ -71,7 +75,7 @@ class ConfigHelper:
         self.__config_path = config_path
         self.__config: Config | None = None
 
-    def open_store(self):
+    def open_store(self) -> SqliteRssStore:
         return self.get_config().open_store()
 
     def iter_feeds(self) -> Iterable[Tuple[str, FeedSection]]:
