@@ -84,8 +84,8 @@ def fetch_feed(feed_id: str, feed_section: FeedSection) -> Iterable[RssItemRowRe
 
         try:
             r = requests.get(url, proxies=proxies, timeout=(5, 60))
-        except requests.ConnectionError as error:
-            logger.error('raised %s: %s', type(error).__name__, error)
+        except (requests.ConnectionError, requests.ReadTimeout) as error:
+            logger.info('fetch %r failure with %s', url, error, exc_info=False)
             return []
 
         try:
