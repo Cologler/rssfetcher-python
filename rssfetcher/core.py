@@ -9,17 +9,18 @@ import logging
 import queue
 import threading
 import xml.etree.ElementTree as et
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
 from functools import cache
 from io import StringIO
 from time import monotonic, sleep
-from typing import cast
+from typing import Callable, cast
 from urllib.parse import urlparse
 
 import requests
 from pydantic import ValidationError
 from schedule import Scheduler
 
+from ._utils import create_unique_id
 from .cfg import Config, ConfigHelper, FeedSection
 from .models import RssItemRowRecord
 from .settings import Settings
@@ -46,21 +47,24 @@ def _read_element_text(elements: list[et.Element | None] | et.Element | None) ->
             if el is not None:
                 return el.text
 
-def _element_to_RssItemRowRecord(feed_id: str, item: et.Element, *, logger: logging.Logger) -> RssItemRowRecord | None:
+def _element_to_RssItemRowRecord(feed_id: str, item: et.Element, *, logger: logging.Logger) -> RssItemRowRecord:
     '''
     Convert an XML item element to a RssItemRowRecord.
     '''
-    if unique_id := _read_element_text([item.find('guid'), item.find('title')]):
-        rd: RssItemRowRecord = {
-            'feed_id': feed_id,
-            'rss_id': unique_id,
-            'title': _read_element_text(item.find('title')),
-            'raw': dump_xml(item)
-        }
-        return rd
-    else:
-        logger.warning('item %r has no unique id', item)
-        return None
+    unique_id = _read_element_text(item.find('guid'))
+    raw = dump_xml(item)
+    if not unique_id:
+        logger.warning('item %r has no guid id', item)
+        unique_id = create_unique_id(raw)
+
+    assert unique_id
+    rd: RssItemRowRecord = {
+        'feed_id': feed_id,
+        'rss_id': unique_id,
+        'title': _read_element_text(item.find('title')),
+        'raw': raw
+    }
+    return rd
 
 def fetch_feed(feed_id: str, feed_section: FeedSection) -> Iterable[RssItemRowRecord]:
     collected_items: list[RssItemRowRecord] = []
@@ -161,12 +165,12 @@ class RssFetcherWorker:
         scheduler = self._scheduler
         logger = get_logger()
 
-        def run_on_background(func) -> None:
+        def run_on_background(func: Callable[..., None]) -> None:
             threading.Thread(target=func, daemon=True).start()
 
         @run_on_background
         def consumer() -> None:
-            def filter_unique_feeds(feeds):
+            def filter_unique_feeds(feeds: Iterable[_JobQueueItem]) -> Iterator[_JobQueueItem]:
                 s = set()
                 for f in feeds:
                     if f[0] not in s:
@@ -193,7 +197,8 @@ class RssFetcherWorker:
                 feeds = get_feeds_in_10s()
                 try:
                     if None not in feeds:
-                        unique_feeds = cast(list[tuple[str, FeedSection]], list(filter_unique_feeds(feeds)))
+                        feeds = cast(list[tuple[str, FeedSection]], feeds)
+                        unique_feeds = list(filter_unique_feeds(feeds))
                         get_logger().info('Receive %d fetch jobs.', len(unique_feeds))
                         assert unique_feeds
                         fetch_feeds(self._config_helper, unique_feeds)
