@@ -9,7 +9,7 @@ import os
 from collections import ChainMap
 from contextlib import suppress
 from logging import getLogger
-from typing import Dict, Iterable, NotRequired, Optional, Tuple, TypedDict
+from typing import Dict, Iterable, Literal, NotRequired, Optional, Tuple, TypedDict
 
 import yaml
 from cachetools import cachedmethod
@@ -32,6 +32,7 @@ class FeedSection(TypedDict):
     enable: NotRequired[bool]
     proxy: NotRequired[str]
     proxies: NotRequired[Dict[str, str]]
+    guid_from: NotRequired[Literal['title', 'content']]
 
 
 class OptionsSection(TypedDict):

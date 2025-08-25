@@ -10,7 +10,7 @@ from hashlib import sha1
 
 def create_unique_id(content: str) -> str:
     '''
-    Create unique identifier.
+    Create unique identifier by hashing the content with SHA-1.
     '''
     hashed = sha1(content.encode('utf-8', errors='ignore')).hexdigest()
     return f'sha1:{hashed}'

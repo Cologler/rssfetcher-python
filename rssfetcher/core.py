@@ -47,21 +47,30 @@ def _read_element_text(elements: list[et.Element | None] | et.Element | None) ->
             if el is not None:
                 return el.text
 
-def _element_to_RssItemRowRecord(feed_id: str, item: et.Element, *, logger: logging.Logger) -> RssItemRowRecord:
+def _element_to_RssItemRowRecord(feed_id: str, item: et.Element, feed_section: FeedSection, *,
+        logger: logging.Logger) -> RssItemRowRecord:
     '''
     Convert an XML item element to a RssItemRowRecord.
     '''
     unique_id = _read_element_text(item.find('guid'))
+    title = _read_element_text(item.find('title'))
     raw = dump_xml(item)
+
     if not unique_id:
-        logger.warning('item %r has no guid id', item)
-        unique_id = create_unique_id(raw)
+        logger.debug('item %r has no guid id', item)
+        match feed_section.get('guid_from'):
+            case 'title':
+                unique_id = title
+            case 'content':
+                unique_id = create_unique_id(raw)
+        if not unique_id:
+            unique_id = create_unique_id(raw)
 
     assert unique_id
     rd: RssItemRowRecord = {
         'feed_id': feed_id,
         'rss_id': unique_id,
-        'title': _read_element_text(item.find('title')),
+        'title': title,
         'raw': raw
     }
     return rd
@@ -110,7 +119,7 @@ def fetch_feed(feed_id: str, feed_section: FeedSection) -> Iterable[RssItemRowRe
                 logger.error('invalid xml.')
             else:
                 for item in el.iter('item'):
-                    if rd := _element_to_RssItemRowRecord(feed_id, item, logger=logger):
+                    if rd := _element_to_RssItemRowRecord(feed_id, item, feed_section, logger=logger):
                         collected_items.append(rd)
 
                 logger.info('total found %s items',len(collected_items))
