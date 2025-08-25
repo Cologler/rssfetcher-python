@@ -59,10 +59,14 @@ def _element_to_RssItemRowRecord(feed_id: str, item: et.Element, feed_section: F
     if not unique_id:
         logger.debug('item %r has no guid id', item)
         match feed_section.get('guid_from'):
+            case None:
+                pass
             case 'title':
                 unique_id = title
             case 'content':
                 unique_id = create_unique_id(raw)
+            case _ as val:
+                logger.warning('Unknown guid_from value: %s', val)
         if not unique_id:
             unique_id = create_unique_id(raw)
 

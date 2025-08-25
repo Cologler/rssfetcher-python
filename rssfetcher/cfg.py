@@ -32,7 +32,7 @@ class FeedSection(TypedDict):
     enable: NotRequired[bool]
     proxy: NotRequired[str]
     proxies: NotRequired[Dict[str, str]]
-    guid_from: NotRequired[Literal['title', 'content']]
+    guid_from: NotRequired[Literal['title', 'content'] | str]
 
 
 class OptionsSection(TypedDict):
